@@ -1,0 +1,6 @@
+site_name,region,district,latitude,longitude,site_type,status
+Entebbe Central,Central,Wakiso,0.0512,32.4637,Urban,Active
+Mbale East,Eastern,Mbale,1.0806,34.1750,Urban,Active
+Masaka South,Central,Masaka,-0.3338,31.7341,Urban,Active
+Arua North,West Nile,Arua,3.0290,30.9100,Urban,Active
+Kabale Rural,Western,Kabale,-1.2486,29.9899,Rural,Active
