@@ -1,0 +1,9 @@
+site_name,district,equipment_type,manufacturer,model,incident_type,severity,start_time,end_time,status,description
+Entebbe Central,Wakiso,Router,Cisco,ASR1001-X,High Latency,Medium,2026-08-28 09:15:00,2026-08-28 09:45:00,Resolved,Latency increased above normal operating threshold
+Mbale East,Mbale,Router,Cisco,ASR1001-X,Packet Loss,High,2026-08-28 08:30:00,2026-08-28 10:00:00,Resolved,High packet loss detected on network router
+Mbale East,Mbale,Switch,Huawei,S5735,Link Degradation,Medium,2026-08-28 09:20:00,2026-08-28 10:20:00,Resolved,Network link experiencing intermittent degradation
+Masaka South,Masaka,Radio,Ericsson,MINI-LINK 6352,Signal Degradation,High,2026-08-28 08:45:00,2026-08-28 11:15:00,Resolved,Radio signal strength dropped below acceptable level
+Arua North,Arua,Router,Cisco,ASR1001-X,High Packet Loss,Critical,2026-08-28 08:10:00,2026-08-28 10:30:00,Resolved,Severe packet loss affecting network service
+Kabale Rural,Kabale,Radio,Nokia,FlexiPacket,Link Down,Critical,2026-08-28 08:50:00,2026-08-28 09:40:00,Resolved,Radio link temporarily unavailable
+Soroti Central,Soroti,Router,Cisco,ISR4331,High Latency,Medium,2026-08-28 09:10:00,2026-08-28 09:55:00,Resolved,Latency exceeded normal threshold
+Entebbe Central,Wakiso,Radio,Ericsson,MINI-LINK 6352,Packet Loss,Low,2026-08-28 08:25:00,2026-08-28 08:40:00,Resolved,Minor packet loss detected
