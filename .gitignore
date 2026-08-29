@@ -1,5 +1,22 @@
+# Virtual Environment Folder Sandbox
 .venv/
+venv/
+ENV/
+
+# Python Compilation Cache Binaries
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Secured Local Environment & Password Variable Profiles
 .env
+.env.*
+secrets.json
+
+# Jupyter Notebook Automated Tracking Checkpoints
 .ipynb_checkpoints/
+
+# Local Operating System System Metadata Packages
+.DS_Store
+Thumbs.db
