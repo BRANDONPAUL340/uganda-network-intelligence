@@ -1,0 +1,9 @@
+site_name,district,equipment_type,manufacturer,model,installation_date,status
+Entebbe Central,Wakiso,Router,Cisco,ASR1001-X,2024-01-15,Active
+Entebbe Central,Wakiso,Radio,Ericsson,MINI-LINK 6352,2024-02-10,Active
+Mbale East,Mbale,Router,Cisco,ASR1001-X,2023-11-20,Active
+Mbale East,Mbale,Switch,Huawei,S5735,2023-12-05,Active
+Masaka South,Masaka,Radio,Ericsson,MINI-LINK 6352,2024-03-18,Active
+Arua North,Arua,Router,Cisco,ASR1001-X,2024-04-12,Active
+Kabale Rural,Kabale,Radio,Nokia,FlexiPacket,2023-09-25,Maintenance
+Soroti Central,Soroti,Router,Cisco,ISR4331,2024-05-10,Active
