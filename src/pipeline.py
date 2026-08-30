@@ -7,35 +7,53 @@ from src.transformation.silver import run_silver
 from src.transformation.gold import run_gold
 
 
-def start_pipeline_run():
+PIPELINE_NAME = "uganda_network_intelligence"
 
-    # 🛠️ Fixed: Changed start_time to started_at to match database schema mapping
+
+def start_pipeline_run():
+    """
+    Create a new pipeline audit record.
+    """
+
     sql = """
     INSERT INTO pipeline_runs (
         pipeline_name,
         started_at,
         status
     )
+
     VALUES (
-        'uganda_network_intelligence',
+        :pipeline_name,
         :started_at,
         'RUNNING'
     )
+
     RETURNING run_id;
     """
 
     with engine.begin() as connection:
+
         result = connection.execute(
             text(sql),
-            {"started_at": datetime.now()}
+            {
+                "pipeline_name": PIPELINE_NAME,
+                "started_at": datetime.now(),
+            }
         )
 
         return result.scalar()
 
 
-def finish_pipeline_run(run_id, status, records_processed=0, error_message=None):
+def finish_pipeline_run(
+    run_id,
+    status,
+    records_processed=0,
+    error_message=None
+):
+    """
+    Update the pipeline audit record when the run finishes.
+    """
 
-    # 🛠️ Fixed: Changed end_time to completed_at to match database schema mapping
     sql = """
     UPDATE pipeline_runs
 
@@ -49,6 +67,7 @@ def finish_pipeline_run(run_id, status, records_processed=0, error_message=None)
     """
 
     with engine.begin() as connection:
+
         connection.execute(
             text(sql),
             {
@@ -64,8 +83,12 @@ def finish_pipeline_run(run_id, status, records_processed=0, error_message=None)
 def main():
 
     print("=" * 60)
-    print("UGANDA NETWORK & SERVICE INTELLIGENCE PIPELINE")
+    print("UGANDA NETWORK & SERVICE INTELLIGENCE")
     print("=" * 60)
+
+    # -------------------------------------------------
+    # 1. Start pipeline audit
+    # -------------------------------------------------
 
     run_id = start_pipeline_run()
 
@@ -73,24 +96,57 @@ def main():
 
     try:
 
-        print("\nRunning SILVER transformations...")
-        run_silver()
+        # -------------------------------------------------
+        # 2. Run Silver layer
+        # -------------------------------------------------
 
-        print("\nRunning GOLD transformations...")
+        silver_result = run_silver()
+
+        measurements_loaded = (
+            silver_result["measurements_loaded"]
+        )
+
+        health_loaded = (
+            silver_result["health_loaded"]
+        )
+
+        print(
+            f"\nSilver measurements loaded: "
+            f"{measurements_loaded}"
+        )
+
+        print(
+            f"Silver health records loaded: "
+            f"{health_loaded}"
+        )
+
+        # -------------------------------------------------
+        # 3. Run Gold layer
+        # -------------------------------------------------
+
         run_gold()
 
+        # -------------------------------------------------
+        # 4. Mark pipeline as successful
+        # -------------------------------------------------
+
         finish_pipeline_run(
-            run_id,
-            "SUCCESS"
+            run_id=run_id,
+            status="SUCCESS",
+            records_processed=measurements_loaded
         )
 
         print("\nPipeline completed successfully.")
 
     except Exception as error:
 
+        # -------------------------------------------------
+        # 5. Mark pipeline as failed
+        # -------------------------------------------------
+
         finish_pipeline_run(
-            run_id,
-            "FAILED",
+            run_id=run_id,
+            status="FAILED",
             error_message=str(error)
         )
 
