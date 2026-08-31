@@ -8,7 +8,7 @@ from src.ingestion.measurements import run_ingestion
 from src.logger import get_logger
 from src.quality import run_quality_checks
 from src.transformation.silver import run_silver
-from src.transformation.gold import run_gold
+from src.transformation.gold import run_incremental_gold
 
 
 # Initialize our central orchestrator logger utility instance
@@ -135,7 +135,7 @@ def main():
         # 4. GOLD
         # -------------------------------------------------
         logger.info("--- GOLD ---")
-        run_gold()
+        run_incremental_gold()
 
         # -------------------------------------------------
         # 5. SUCCESS
