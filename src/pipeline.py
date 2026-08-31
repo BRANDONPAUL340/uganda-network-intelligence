@@ -4,8 +4,9 @@ import time
 from sqlalchemy import text
 
 from src.database import engine
+from src.ingestion.measurements import run_ingestion
 from src.logger import get_logger
-from src.quality import run_quality_checks
+from src.quality.checks import run_data_quality
 from src.transformation.silver import run_silver
 from src.transformation.gold import run_gold
 
@@ -52,6 +53,8 @@ def finish_pipeline_run(
     records_rejected=0,
     silver_records_processed=0,
     gold_records_processed=0,
+    quality_checks_run=0,
+    quality_checks_failed=0,
     error_message=None
 ):
     """
@@ -68,6 +71,8 @@ def finish_pipeline_run(
         records_rejected = :records_rejected,
         silver_records_processed = :silver_records_processed,
         gold_records_processed = :gold_records_processed,
+        quality_checks_run = :quality_checks_run,
+        quality_checks_failed = :quality_checks_failed,
         records_processed = :records_inserted,
         error_message = :error_message
     WHERE run_id = :run_id;
@@ -87,6 +92,8 @@ def finish_pipeline_run(
                 "records_rejected": records_rejected,
                 "silver_records_processed": silver_records_processed,
                 "gold_records_processed": gold_records_processed,
+                "quality_checks_run": quality_checks_run,
+                "quality_checks_failed": quality_checks_failed,
                 "error_message": error_message,
             }
         )
@@ -100,8 +107,9 @@ def main():
     run_id = start_pipeline_run()
     logger.info(f"Pipeline run ID: {run_id}")
 
-    # Initialize metrics dictionaries cleanly
+    # Initialize stage metric dictionaries cleanly to protect against crash scopes
     ingestion_metrics = {}
+    quality_metrics = {}
     silver_metrics = {}
     gold_metrics = {}
 
@@ -109,30 +117,31 @@ def main():
         # -------------------------------------------------
         # 1. INGESTION
         # -------------------------------------------------
-        logger.info("--- INGESTION ---")
-        from src.ingestion.measurements import run_ingestion
         ingestion_metrics = run_ingestion()
 
         # -------------------------------------------------
         # 2. DATA QUALITY
         # -------------------------------------------------
-        logger.info("--- DATA QUALITY ---")
-        run_quality_checks()
+        quality_metrics = run_data_quality(run_id)
+
+        if quality_metrics.get("failed_checks", 0) > 0:
+            raise RuntimeError(
+                f"Data-quality checks failed. "
+                f"Flagged {quality_metrics['failed_checks']} validation anomalies."
+            )
 
         # -------------------------------------------------
         # 3. SILVER
         # -------------------------------------------------
-        logger.info("--- SILVER ---")
         silver_metrics = run_silver()
 
         # -------------------------------------------------
         # 4. GOLD
         # -------------------------------------------------
-        logger.info("--- GOLD ---")
         gold_metrics = run_gold()
 
         # -------------------------------------------------
-        # 5. SUCCESS
+        # 5. SUCCESS PATH
         # -------------------------------------------------
         finish_pipeline_run(
             run_id=run_id,
@@ -141,13 +150,15 @@ def main():
             records_inserted=ingestion_metrics.get("records_inserted", 0),
             records_rejected=ingestion_metrics.get("records_rejected", 0),
             silver_records_processed=silver_metrics.get("measurements_loaded", 0),
-            gold_records_processed=gold_metrics.get("gold_records_processed", 0)
+            gold_records_processed=gold_metrics.get("gold_records_processed", 0),
+            quality_checks_run=quality_metrics.get("checks_run", 0),
+            quality_checks_failed=quality_metrics.get("failed_checks", 0)
         )
-        logger.info("Pipeline completed successfully.")
+        logger.info("🎉 Complete Medallion architecture chain finished successfully.")
 
     except Exception as error:
         # -------------------------------------------------
-        # 6. FAILURE
+        # 6. FAILURE PATH (Maintains full tracking states)
         # -------------------------------------------------
         finish_pipeline_run(
             run_id=run_id,
@@ -157,6 +168,8 @@ def main():
             records_rejected=ingestion_metrics.get("records_rejected", 0),
             silver_records_processed=silver_metrics.get("measurements_loaded", 0),
             gold_records_processed=gold_metrics.get("gold_records_processed", 0),
+            quality_checks_run=quality_metrics.get("checks_run", 0),
+            quality_checks_failed=quality_metrics.get("failed_checks", 0),
             error_message=str(error)
         )
         logger.error("Pipeline failed.")
