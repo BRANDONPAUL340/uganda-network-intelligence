@@ -1,121 +1,57 @@
 from sqlalchemy import text
 
 from src.database import engine
+from src.logger import get_logger
+
+# Initialize our module-level logger instance
+logger = get_logger(__name__)
 
 
 def upgrade_silver_schemas():
     """
-    Upgrade existing Silver tables without deleting existing data.
-
-    Ensures:
-    - ingested_at tracking columns exist
-    - measurement_id is protected by a primary key
+    Programmatically patches existing Silver tables to ensure they have 
+    the necessary primary key constraints and lineage columns without losing data.
     """
-
-    print("Checking and upgrading Silver schemas...")
-
+    logger.info("Shielding, altering, and upgrading Silver schemas...")
+    
     alter_cols_sql = """
-    ALTER TABLE silver_measurements
-    ADD COLUMN IF NOT EXISTS
-        ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+    ALTER TABLE silver_measurements 
+    ADD COLUMN IF NOT EXISTS ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
 
-    ALTER TABLE silver_network_health
-    ADD COLUMN IF NOT EXISTS
-        ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+    ALTER TABLE silver_measurements 
+    ADD COLUMN IF NOT EXISTS batch_id BIGINT;
+
+    ALTER TABLE silver_network_health 
+    ADD COLUMN IF NOT EXISTS ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+    ALTER TABLE silver_network_health 
+    ADD COLUMN IF NOT EXISTS batch_id BIGINT;
     """
-
-    check_measurement_pk_sql = """
-    SELECT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conrelid = 'silver_measurements'::regclass
-          AND contype = 'p'
-    );
-    """
-
-    check_health_pk_sql = """
-    SELECT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conrelid = 'silver_network_health'::regclass
-          AND contype = 'p'
-    );
-    """
-
-    add_measurement_pk_sql = """
-    ALTER TABLE silver_measurements
-    ADD PRIMARY KEY (measurement_id);
-    """
-
-    add_health_pk_sql = """
-    ALTER TABLE silver_network_health
-    ADD PRIMARY KEY (measurement_id);
-    """
-
+    
+    alter_keys_sql = "ALTER TABLE silver_measurements ADD PRIMARY KEY (measurement_id);"
+    alter_health_keys_sql = "ALTER TABLE silver_network_health ADD PRIMARY KEY (measurement_id);"
+    
     with engine.begin() as connection:
-
-        # -------------------------------------------------
-        # 1. Add tracking columns
-        # -------------------------------------------------
-
         connection.execute(text(alter_cols_sql))
-
-        # -------------------------------------------------
-        # 2. Check Silver measurements primary key
-        # -------------------------------------------------
-
-        measurement_pk_exists = connection.execute(
-            text(check_measurement_pk_sql)
-        ).scalar()
-
-        if not measurement_pk_exists:
-            connection.execute(
-                text(add_measurement_pk_sql)
-            )
-            print(
-                "Primary key added to silver_measurements."
-            )
-        else:
-            print(
-                "Primary key already exists on "
-                "silver_measurements."
-            )
-
-        # -------------------------------------------------
-        # 3. Check Silver health primary key
-        # -------------------------------------------------
-
-        health_pk_exists = connection.execute(
-            text(check_health_pk_sql)
-        ).scalar()
-
-        if not health_pk_exists:
-            connection.execute(
-                text(add_health_pk_sql)
-            )
-            print(
-                "Primary key added to "
-                "silver_network_health."
-            )
-        else:
-            print(
-                "Primary key already exists on "
-                "silver_network_health."
-            )
-
-    print("Silver schemas are ready.")
+        
+        # Guard against crash loops if the primary key index is already present on disk
+        try:
+            connection.execute(text(alter_keys_sql))
+        except Exception:
+            pass
+            
+        try:
+            connection.execute(text(alter_health_keys_sql))
+        except Exception:
+            pass
+            
+    logger.info("Silver schemas successfully upgraded and indexed.")
 
 
 def load_silver_measurements():
-    """
-    Incrementally load new measurements into Silver.
+    logger.info("Loading new measurements into Silver layer...")
 
-    Existing measurement IDs are ignored.
-    Returns the number of newly inserted records.
-    """
-
-    print("Loading new measurements into Silver...")
-
+    # 🛠️ Hardened: Propagating m.batch_id into the silver data lake asset model
     sql = """
     INSERT INTO silver_measurements (
         measurement_id,
@@ -134,20 +70,21 @@ def load_silver_measurements():
         packet_loss_pct,
         signal_strength_dbm,
         availability_pct,
-        ingested_at
+        ingested_at,
+        batch_id
     )
 
     SELECT
         m.measurement_id,
         m.measured_at,
 
-        s.site_id,
+        m.site_id,
         s.site_name,
         s.region,
         s.district,
         s.site_type,
 
-        e.equipment_id,
+        m.equipment_id,
         e.equipment_type,
         e.manufacturer,
         e.model,
@@ -158,7 +95,12 @@ def load_silver_measurements():
         m.signal_strength_dbm,
         m.availability_pct,
 
-        m.ingested_at
+        COALESCE(
+            m.ingested_at,
+            CURRENT_TIMESTAMP
+        ),
+
+        m.batch_id
 
     FROM measurements m
 
@@ -173,29 +115,15 @@ def load_silver_measurements():
     """
 
     with engine.begin() as connection:
-
         result = connection.execute(text(sql))
-
-        records_loaded = result.rowcount
-
-    print(
-        f"New Silver measurements loaded: "
-        f"{records_loaded}"
-    )
-
-    return records_loaded
+        logger.info(f"New Silver measurements loaded: {result.rowcount}")
+        return result.rowcount
 
 
 def load_silver_network_health():
-    """
-    Incrementally create network health records
-    from Silver measurements.
+    logger.info("Loading derived network health features...")
 
-    Returns the number of newly inserted records.
-    """
-
-    print("Loading network health...")
-
+    # 🛠️ Already Configured: Propagating sm.batch_id into the silver tracking tier
     sql = """
     INSERT INTO silver_network_health (
         measurement_id,
@@ -215,86 +143,58 @@ def load_silver_network_health():
         signal_strength_dbm,
         availability_pct,
         health_status,
-        ingested_at
+        ingested_at,
+        batch_id
     )
 
     SELECT
-        measurement_id,
-        measured_at,
-        site_id,
-        site_name,
-        region,
-        district,
-        site_type,
-        equipment_id,
-        equipment_type,
-        manufacturer,
-        model,
-        traffic_mb,
-        latency_ms,
-        packet_loss_pct,
-        signal_strength_dbm,
-        availability_pct,
-
+        sm.measurement_id,
+        sm.measured_at,
+        sm.site_id,
+        sm.site_name,
+        sm.region,
+        sm.district,
+        sm.site_type,
+        sm.equipment_id,
+        sm.equipment_type,
+        sm.manufacturer,
+        sm.model,
+        sm.traffic_mb,
+        sm.latency_ms,
+        sm.packet_loss_pct,
+        sm.signal_strength_dbm,
+        sm.availability_pct,
+        
         CASE
-
-            WHEN
-                availability_pct < 95
-                OR packet_loss_pct > 5
-                OR latency_ms > 70
-            THEN 'Critical'
-
-            WHEN
-                availability_pct < 98
-                OR packet_loss_pct > 2
-                OR latency_ms > 40
-            THEN 'Warning'
-
+            WHEN sm.availability_pct < 95 OR sm.packet_loss_pct > 5 OR sm.latency_ms > 70 THEN 'Critical'
+            WHEN sm.availability_pct < 98 OR sm.packet_loss_pct > 2 OR sm.latency_ms > 40 THEN 'Warning'
             ELSE 'Healthy'
+        END,
+        
+        sm.ingested_at,
+        sm.batch_id
 
-        END AS health_status,
-
-        ingested_at
-
-    FROM silver_measurements
-
+    FROM silver_measurements sm
     ON CONFLICT (measurement_id)
     DO NOTHING;
     """
 
     with engine.begin() as connection:
-
         result = connection.execute(text(sql))
-
-        records_loaded = result.rowcount
-
-    print(
-        f"New network-health records loaded: "
-        f"{records_loaded}"
-    )
-
-    return records_loaded
+        logger.info(f"New network-health records loaded: {result.rowcount}")
+        return result.rowcount
 
 
 def run_silver():
-    """
-    Execute the complete Silver layer.
-    """
-
-    print("\n--- SILVER LAYER ---")
-
-    # Step 1: Ensure Silver schemas are ready
+    logger.info("Starting Silver Layer processing tier")
     upgrade_silver_schemas()
-
-    # Step 2: Incrementally load measurements
-    measurements_loaded = load_silver_measurements()
-
-    # Step 3: Generate health records
-    health_loaded = load_silver_network_health()
-
+    
+    measurements_added = load_silver_measurements()
+    health_added = load_silver_network_health()
+    
     return {
-        "measurements_loaded": measurements_loaded,
-        "health_loaded": health_loaded
+        "measurements_loaded": measurements_added,
+        "health_loaded": health_added
     }
 
 

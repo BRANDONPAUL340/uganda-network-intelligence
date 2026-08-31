@@ -11,8 +11,8 @@ from src.logger import get_logger
 logger = get_logger(__name__)
 
 
-# Establish root folder reference levels dynamically
-BASE_DIR = Path(__file__).resolve().parents
+# 🛠️ Fixed permanently: Added index [2] to extract the exact project folder path out of the collection
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 SOURCE_FILE = (
     BASE_DIR
