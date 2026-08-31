@@ -49,3 +49,16 @@ Calculates non-destructive, business-ready aggregates, such as regional tower da
 - **Comprehensive Run Observability:** Tracks execution durations down to the millisecond using `time.perf_counter()`.
 - **System Diary Audit Ledger:** Registers pipeline health statuses (`STARTED`, `SUCCESS`, `FAILED`) to internal table archives dynamically.
 - **Decoupled Configuration State Matrix:** Protects local passwords by isolating variable credentials to hidden environment arrays (`.env` -> `config.py`).
+## 🔄 End-to-End Pipeline Execution
+
+The platform processes network monitoring telemetry through a fully automated, synchronized end-to-end data pipeline:
+
+1. **Bronze CSV Ingestion:** Extracts raw, flat-file network telemetry packets from our landing archive zone.
+2. **Record Validation Gateway:** Filters records in memory to catch missing required fields or logical range errors before calling database connections.
+3. **Idempotent Loading:** Securely streams validated records down to our raw PostgreSQL staging tables.
+4. **Data Quality Gateway Firewall:** Automatically audits database-wide stability constraints before transforming data layers.
+5. **Silver Layer Transformation:** Enriches raw facts with relational metadata models and filters out duplicate rows incrementally.
+6. **Gold Analytics Tier:** Truncates and refreshes high-level business intelligence aggregates for daily reporting layers.
+7. **Pipeline Run Auditing:** Logs microsecond runtime speeds, error trace records, and volumetric data balances down to a central tracking ledger table.
+
+The ingestion framework is designed to be completely **idempotent**, using a natural composite business key combination (**`equipment_id` + `measured_at`**) as a uniqueness firewall to confidently block duplicate measurements without throwing platform errors or corrupting your analytical trends.

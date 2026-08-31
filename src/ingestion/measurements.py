@@ -1,4 +1,5 @@
 import csv
+import hashlib
 from pathlib import Path
 
 from sqlalchemy import text
@@ -10,7 +11,7 @@ from src.logger import get_logger
 logger = get_logger(__name__)
 
 
-# Establish root folder reference levels dynamically
+# 🛠️ Fixed: Added [2] to get the specific project root path out of the collection
 BASE_DIR = Path(__file__).resolve().parents[2]
 
 SOURCE_FILE = (
@@ -19,6 +20,125 @@ SOURCE_FILE = (
     / "bronze"
     / "network_measurements.csv"
 )
+
+
+
+def calculate_file_checksum():
+    """
+    Reads the data file in binary blocks and generates a completely 
+    unique SHA-256 fingerprint signature hash for the contents.
+    """
+    sha256 = hashlib.sha256()
+
+    with SOURCE_FILE.open("rb") as file:
+
+        for chunk in iter(
+            lambda: file.read(8192),
+            b""
+        ):
+            sha256.update(chunk)
+
+    return sha256.hexdigest()
+
+
+def batch_already_processed(checksum):
+    """
+    Check if exactly this file content hash has already been loaded successfully.
+    """
+    sql = """
+    SELECT batch_id
+    FROM source_batches
+    WHERE file_checksum = :checksum
+      AND status = 'SUCCESS'
+    LIMIT 1;
+    """
+
+    with engine.begin() as connection:
+
+        result = connection.execute(
+            text(sql),
+            {
+                "checksum": checksum
+            }
+        )
+
+        return result.scalar()
+
+
+def start_batch(checksum):
+    """
+    Log the initialization of a fresh file ingestion batch run ticket.
+    """
+    sql = """
+    INSERT INTO source_batches (
+        source_name,
+        file_name,
+        file_checksum,
+        status
+    )
+
+    VALUES (
+        :source_name,
+        :file_name,
+        :checksum,
+        'RUNNING'
+    )
+
+    RETURNING batch_id;
+    """
+
+    with engine.begin() as connection:
+
+        result = connection.execute(
+            text(sql),
+            {
+                "source_name": "network_measurements",
+                "file_name": SOURCE_FILE.name,
+                "checksum": checksum
+            }
+        )
+
+        return result.scalar()
+
+
+def finish_batch(
+    batch_id,
+    records_read,
+    records_inserted,
+    records_rejected,
+    status="SUCCESS",
+    error_message=None
+):
+    """
+    Update the source batch metadata log tracking metrics when the job ends.
+    """
+    sql = """
+    UPDATE source_batches
+
+    SET
+        records_read = :records_read,
+        records_inserted = :records_inserted,
+        records_rejected = :records_rejected,
+        status = :status,
+        completed_at = CURRENT_TIMESTAMP,
+        error_message = :error_message
+
+    WHERE batch_id = :batch_id;
+    """
+
+    with engine.begin() as connection:
+
+        connection.execute(
+            text(sql),
+            {
+                "batch_id": batch_id,
+                "records_read": records_read,
+                "records_inserted": records_inserted,
+                "records_rejected": records_rejected,
+                "status": status,
+                "error_message": error_message
+            }
+        )
 
 
 def read_measurements():
@@ -167,36 +287,91 @@ def run_ingestion():
         "Starting measurement ingestion"
     )
 
+    checksum = calculate_file_checksum()
+
+    logger.info(
+        f"Source checksum: {checksum}"
+    )
+
+    existing_batch = batch_already_processed(
+        checksum
+    )
+
+    if existing_batch:
+
+        logger.info(
+            f"Batch already processed: "
+            f"{existing_batch}"
+        )
+
+        return {
+            "records_read": 0,
+            "records_inserted": 0,
+            "records_rejected": 0,
+            "duplicates": 0,
+            "batch_id": existing_batch,
+            "skipped": True
+        }
+
+    batch_id = start_batch(checksum)
+
     records = read_measurements()
 
     inserted = 0
     duplicates = 0
     rejected = 0
 
-    for record in records:
+    try:
 
-        try:
+        for record in records:
 
-            validate_measurement(record)
+            try:
 
-            result = insert_measurement(record)
+                validate_measurement(record)
 
-            if result == 1:
-                inserted += 1
+                result = insert_measurement(
+                    record
+                )
 
-            else:
-                duplicates += 1
+                if result == 1:
 
-        except Exception as error:
+                    inserted += 1
 
-            rejected += 1
+                else:
 
-            logger.error(
-                f"Rejected record: {error}"
-            )
+                    duplicates += 1
+
+            except Exception as error:
+
+                rejected += 1
+
+                logger.error(
+                    f"Rejected record: {error}"
+                )
+
+        finish_batch(
+            batch_id=batch_id,
+            records_read=len(records),
+            records_inserted=inserted,
+            records_rejected=rejected
+        )
+
+    except Exception as error:
+
+        finish_batch(
+            batch_id=batch_id,
+            records_read=len(records),
+            records_inserted=inserted,
+            records_rejected=rejected,
+            status="FAILED",
+            error_message=str(error)
+        )
+
+        raise
 
     logger.info(
         f"Ingestion complete | "
+        f"batch={batch_id} | "
         f"read={len(records)} | "
         f"inserted={inserted} | "
         f"duplicates={duplicates} | "
@@ -208,6 +383,8 @@ def run_ingestion():
         "records_inserted": inserted,
         "records_rejected": rejected,
         "duplicates": duplicates,
+        "batch_id": batch_id,
+        "skipped": False
     }
 
 
