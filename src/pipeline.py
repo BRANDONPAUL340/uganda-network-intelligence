@@ -11,7 +11,7 @@ from src.transformation.silver import run_silver
 from src.transformation.gold import run_gold
 
 
-# Initialize our central orchestrator logger utility
+# Initialize our central orchestrator logger utility instance
 logger = get_logger(__name__)
 
 PIPELINE_NAME = "uganda_network_intelligence"
@@ -87,57 +87,58 @@ def finish_pipeline_run(
 
 def main():
     logger.info("=" * 60)
-    logger.info("UGANDA NETWORK & SERVICE INTELLIGENCE CONDUCTOR")
+    logger.info("UGANDA NETWORK & SERVICE INTELLIGENCE ORCHESTRATOR")
     logger.info("=" * 60)
 
-    # Start performance runtime clock
     start_time = time.perf_counter()
 
-    # Open our system audit run log entry ticket
     run_id = start_pipeline_run()
-    logger.info(f"Pipeline run ID initiated: {run_id}")
 
-    # Set up our volumetric balancing counter fields baseline
+    logger.info(f"Pipeline run ID: {run_id}")
+
     records_read = 0
     records_processed = 0
     records_rejected = 0
 
     try:
         # -------------------------------------------------
-        # 1. BRONZE FILE INGESTION LAYER
+        # 1. INGESTION
         # -------------------------------------------------
-        logger.info("Triggering Stage 1: Bronze File Ingestion Layer...")
-        ingest_result = run_ingestion()
-        
-        # Pull dynamic file loading stats to populate audit log metrics
-        records_read = ingest_result.get("records_read", 0)
-        records_rejected = ingest_result.get("records_rejected", 0)
+        logger.info("--- INGESTION ---")
+        ingestion_result = run_ingestion()
+
+        records_read = ingestion_result["records_read"]
+        records_processed = ingestion_result["records_inserted"]
+        records_rejected = ingestion_result["records_rejected"]
+
+        logger.info(f"Records read: {records_read}")
+        logger.info(f"Records inserted: {records_processed}")
+        logger.info(f"Records rejected: {records_rejected}")
+        logger.info(f"Duplicates: {ingestion_result['duplicates']}")
 
         # -------------------------------------------------
-        # 2. DATA QUALITY GATEWAY FIREWALL
+        # 2. DATA QUALITY
         # -------------------------------------------------
-        logger.info("Triggering Stage 2: Data Quality Gateway validation checks...")
+        logger.info("--- DATA QUALITY ---")
         run_quality_checks()
 
         # -------------------------------------------------
-        # 3. SILVER INCREMENTAL TRANSFORMATION
+        # 3. SILVER
         # -------------------------------------------------
-        logger.info("Triggering Stage 3: Silver Layer processing tier...")
+        logger.info("--- SILVER ---")
         silver_result = run_silver()
-        
-        if isinstance(silver_result, dict):
-            records_processed = silver_result.get("measurements_loaded", 0)
-        else:
-            records_processed = silver_result if silver_result is not None else 0
+
+        logger.info(f"Silver measurements loaded: {silver_result['measurements_loaded']}")
+        logger.info(f"Silver health records loaded: {silver_result['health_loaded']}")
 
         # -------------------------------------------------
-        # 4. GOLD ANALYTICAL SUMMARIZATION
+        # 4. GOLD
         # -------------------------------------------------
-        logger.info("Triggering Stage 4: Gold Layer analytical summarization...")
+        logger.info("--- GOLD ---")
         run_gold()
 
         # -------------------------------------------------
-        # 5. SUCCESS EXECUTION CLOSEOUT
+        # 5. SUCCESS
         # -------------------------------------------------
         duration = time.perf_counter() - start_time
 
@@ -149,13 +150,11 @@ def main():
             records_rejected=records_rejected,
             duration_seconds=duration
         )
-        logger.info("🎉 COMPLETE PIPELINE ORCHESTRATION FINISHED WITH SUCCESS")
-        logger.info(f"Total execution time: {duration:.3f} seconds")
+
+        logger.info("Pipeline completed successfully.")
+        logger.info(f"Execution time: {duration:.3f} seconds")
 
     except Exception as error:
-        # -------------------------------------------------
-        # 6. EXCEPTION CRASH HANDLING TRACKING
-        # -------------------------------------------------
         duration = time.perf_counter() - start_time
 
         finish_pipeline_run(
@@ -167,9 +166,9 @@ def main():
             duration_seconds=duration,
             error_message=str(error)
         )
-        logger.error("❌ PIPELINE RUN ENCOUNTERED AN EXCEPTION FAILURE CRASH")
-        logger.error(f"Execution turnaround time prior to abort: {duration:.3f} seconds")
-        logger.exception("Captured Exception Trace details:")
+
+        logger.error("Pipeline failed.")
+        logger.error(f"Error: {error}")
         raise
 
 
