@@ -11,8 +11,8 @@ from src.logger import get_logger
 logger = get_logger(__name__)
 
 
-# 🛠️ Fixed: Added [2] to get the specific project root path out of the collection
-BASE_DIR = Path(__file__).resolve().parents[2]
+# Establish root folder reference levels dynamically
+BASE_DIR = Path(__file__).resolve().parents
 
 SOURCE_FILE = (
     BASE_DIR
@@ -20,7 +20,6 @@ SOURCE_FILE = (
     / "bronze"
     / "network_measurements.csv"
 )
-
 
 
 def calculate_file_checksum():
@@ -217,8 +216,10 @@ def validate_measurement(record):
         )
 
 
-def insert_measurement(record):
-
+def insert_measurement(record, batch_id):
+    """
+    Inserts a validated measurement record while explicitly tagging its source data lineage.
+    """
     sql = """
     INSERT INTO measurements (
         equipment_id,
@@ -228,7 +229,8 @@ def insert_measurement(record):
         latency_ms,
         packet_loss_pct,
         signal_strength_dbm,
-        availability_pct
+        availability_pct,
+        batch_id
     )
 
     VALUES (
@@ -239,7 +241,8 @@ def insert_measurement(record):
         :latency_ms,
         :packet_loss_pct,
         :signal_strength_dbm,
-        :availability_pct
+        :availability_pct,
+        :batch_id
     )
     ON CONFLICT (
         equipment_id,
@@ -275,6 +278,7 @@ def insert_measurement(record):
                 "availability_pct": float(
                     record["availability_pct"]
                 ),
+                "batch_id": batch_id,
             }
         )
 
@@ -329,8 +333,10 @@ def run_ingestion():
 
                 validate_measurement(record)
 
+                # 🔑 Upgraded: Passing the structural batch ticket index through to enforce data lineage tracking
                 result = insert_measurement(
-                    record
+                    record,
+                    batch_id
                 )
 
                 if result == 1:
