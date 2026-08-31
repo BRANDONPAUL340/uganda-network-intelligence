@@ -1,6 +1,10 @@
 from sqlalchemy import text
 
 from src.database import engine
+from src.logger import get_logger
+
+# Initialize our module-level logger instance
+logger = get_logger(__name__)
 
 
 def check_null_values():
@@ -136,7 +140,7 @@ def run_quality_checks():
     quality check fails.
     """
 
-    print("\n--- DATA QUALITY ---")
+    logger.info("Starting data quality checks...")
 
     checks = {
         "NULL required fields": check_null_values(),
@@ -152,11 +156,11 @@ def run_quality_checks():
     for check_name, count in checks.items():
 
         if count == 0:
-            print(f"PASS  | {check_name}")
+            logger.info(f"PASS | {check_name}")
 
         else:
-            print(
-                f"FAIL  | {check_name} | "
+            logger.error(
+                f"FAIL | {check_name} | "
                 f"{count} bad records"
             )
 
@@ -176,8 +180,8 @@ def run_quality_checks():
             + message
         )
 
-    print("\nAll data quality checks passed.")
+    logger.info("All data quality checks passed.")
 
 
 if __name__ == "__main__":
-   run_quality_checks()
+    run_quality_checks()

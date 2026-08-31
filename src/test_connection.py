@@ -1,9 +1,21 @@
+from sqlalchemy import text
+
 from src.database import engine
 
-def run_test():
-    print("Attempting to connect to PostgreSQL...")
+
+def test_connection():
+
     with engine.connect() as connection:
-        print("Successfully connected to PostgreSQL!")
+
+        result = connection.execute(
+            text("SELECT version();")
+        )
+
+        version = result.scalar()
+
+        print("Database connection successful.")
+        print(version)
+
 
 if __name__ == "__main__":
-    run_test()
+    test_connection()

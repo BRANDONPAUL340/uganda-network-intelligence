@@ -4,10 +4,14 @@ import time
 from sqlalchemy import text
 
 from src.database import engine
+from src.logger import get_logger
 from src.quality import run_quality_checks
 from src.transformation.silver import run_silver
 from src.transformation.gold import run_gold
 
+
+# Initialize our high-utility module-level logger instance
+logger = get_logger(__name__)
 
 PIPELINE_NAME = "uganda_network_intelligence"
 
@@ -110,9 +114,9 @@ def get_measurement_count():
 
 def main():
 
-    print("=" * 60)
-    print("UGANDA NETWORK & SERVICE INTELLIGENCE")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("UGANDA NETWORK & SERVICE INTELLIGENCE")
+    logger.info("=" * 60)
 
     # Start execution timer
     start_time = time.perf_counter()
@@ -120,58 +124,44 @@ def main():
     # Create audit record
     run_id = start_pipeline_run()
 
-    print(f"\nPipeline run ID: {run_id}")
+    logger.info(f"Pipeline run ID initiated: {run_id}")
 
-    # 📊 Dynamically collect raw volume metrics on startup
+    # Volumetric extraction check parameters setup
     records_read = get_measurement_count()
     records_processed = 0
     records_rejected = 0
 
-    print(
-        f"Records read from measurements: "
-        f"{records_read}"
-    )
+    logger.info(f"Records read from raw staging area measurements: {records_read}")
 
     try:
 
         # -------------------------------------------------
         # 1. DATA QUALITY
         # -------------------------------------------------
-
-        print("\nRunning data quality checks...")
-
+        logger.info("Triggering data quality gateway validation checks...")
         run_quality_checks()
 
         # -------------------------------------------------
         # 2. SILVER
         # -------------------------------------------------
-
         silver_result = run_silver()
 
-        # Safe Fallback: Map either raw integer rows counts or dictionary outputs cleanly
         if isinstance(silver_result, dict):
             records_processed = silver_result.get("measurements_loaded", 0)
         else:
             records_processed = silver_result if silver_result is not None else 0
 
-        print(
-            f"\nRecords processed: "
-            f"{records_processed}"
-        )
+        logger.info(f"Silver incremental transformations processing complete. Records added: {records_processed}")
 
         # -------------------------------------------------
         # 3. GOLD
         # -------------------------------------------------
-
         run_gold()
 
         # -------------------------------------------------
-        # 4. SUCCESS
+        # 4. SUCCESS CLOSEOUT
         # -------------------------------------------------
-
-        duration = (
-            time.perf_counter() - start_time
-        )
+        duration = time.perf_counter() - start_time
 
         finish_pipeline_run(
             run_id=run_id,
@@ -182,24 +172,16 @@ def main():
             duration_seconds=duration
         )
 
-        print("\nPipeline completed successfully.")
-
-        print(
-            f"Execution time: "
-            f"{duration:.3f} seconds"
-        )
+        logger.info("🎉 PIPELINE RUN COMPLETED SUCCESSFULLY")
+        logger.info(f"Total execution runtime duration: {duration:.3f} seconds")
 
     except Exception as error:
 
         # -------------------------------------------------
-        # 5. FAILURE
+        # 5. FAILURE CLOSEOUT
         # -------------------------------------------------
-
-        duration = (
-            time.perf_counter() - start_time
-        )
+        duration = time.perf_counter() - start_time
         
-        # Determine rejected rows count if a validation failure occurred inside raw
         if "Data quality checks failed" in str(error):
             records_rejected = records_read
 
@@ -213,15 +195,9 @@ def main():
             error_message=str(error)
         )
 
-        print("\nPipeline failed.")
-
-        print(
-            f"Execution time: "
-            f"{duration:.3f} seconds"
-        )
-
-        print(f"Error: {error}")
-
+        logger.error("❌ PIPELINE RUN ENCOUNTERED AN EXCEPTION FAILURE")
+        logger.error(f"Execution turnaround time prior to abort: {duration:.3f} seconds")
+        logger.error(f"Captured Exception Reason Details: {error}")
         raise
 
 
