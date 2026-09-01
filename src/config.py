@@ -27,7 +27,7 @@ DATABASE_USER = os.getenv(
 )
 
 DATABASE_PASSWORD = os.getenv(
-    "DATABASE_PASSWORD"
+    "DATABASE_PASSWORD", "tech"
 )
 
 

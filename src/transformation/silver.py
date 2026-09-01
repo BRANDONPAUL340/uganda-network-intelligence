@@ -3,7 +3,7 @@ from sqlalchemy import text
 from src.database import engine
 from src.logger import get_logger
 
-# 🛠️ Hardened: Instantiating centralized module logger context name
+# Initialize module-level logger instance
 logger = get_logger(__name__)
 
 
@@ -47,8 +47,28 @@ def upgrade_silver_schemas():
     logger.info("Silver schemas successfully upgraded and indexed.")
 
 
-def load_silver_measurements():
-    logger.info("Loading new measurements into Silver layer.")
+def get_latest_successful_batch_id():
+    """
+    Finds the highest successful batch ID registered in our metadata registry.
+    """
+    sql = """
+    SELECT MAX(batch_id)
+    FROM source_batches
+    WHERE status = 'SUCCESS';
+    """
+    with engine.begin() as connection:
+        return connection.execute(text(sql)).scalar()
+
+
+def load_silver_measurements(batch_id):
+    """
+    Transforms and enriches raw records belonging ONLY to the latest processed data batch.
+    """
+    if batch_id is None:
+        logger.info("No successful source batches found. Skipping Silver measurements load.")
+        return 0
+
+    logger.info("Checking for new measurements to load into Silver.")
 
     sql = """
     INSERT INTO silver_measurements (
@@ -64,17 +84,26 @@ def load_silver_measurements():
     FROM measurements m
     JOIN sites s ON m.site_id = s.site_id
     JOIN equipment e ON m.equipment_id = e.equipment_id
+    WHERE m.batch_id = :batch_id
     ON CONFLICT (measurement_id) DO NOTHING;
     """
 
     with engine.begin() as connection:
-        result = connection.execute(text(sql))
-        logger.info("New Silver measurements loaded: %s", result.rowcount)
-        return result.rowcount
+        result = connection.execute(text(sql), {"batch_id": batch_id})
+        records_loaded = result.rowcount
+        logger.info("Silver measurements loaded: %s new records.", records_loaded)
+        return records_loaded
 
 
-def load_silver_network_health():
-    logger.info("Loading network health.")
+def load_silver_network_health(batch_id):
+    """
+    Computes features and enriches health status records ONLY for the latest batch.
+    """
+    if batch_id is None:
+        logger.info("No successful source batches found. Skipping Silver health calculation.")
+        return 0
+
+    logger.info("Checking for new network-health records.")
 
     sql = """
     INSERT INTO silver_network_health (
@@ -93,25 +122,36 @@ def load_silver_network_health():
         END,
         sm.ingested_at, sm.batch_id
     FROM silver_measurements sm
+    WHERE sm.batch_id = :batch_id
     ON CONFLICT (measurement_id) DO NOTHING;
     """
 
     with engine.begin() as connection:
-        result = connection.execute(text(sql))
-        logger.info("New network-health records loaded: %s", result.rowcount)
-        return result.rowcount
+        result = connection.execute(text(sql), {"batch_id": batch_id})
+        records_loaded = result.rowcount
+        logger.info("Network-health records loaded: %s new records.", records_loaded)
+        return records_loaded
 
 
 def run_silver():
     logger.info("--- SILVER LAYER ---")
     upgrade_silver_schemas()
     
-    measurements_added = load_silver_measurements()
-    health_added = load_silver_network_health()
+    latest_batch_id = get_latest_successful_batch_id()
+    logger.info("Targeting latest successful ingestion batch. batch_id=%s", latest_batch_id)
     
+    measurements_loaded = load_silver_measurements(latest_batch_id)
+    health_loaded = load_silver_network_health(latest_batch_id)
+    
+    logger.info(
+        "Silver layer completed. measurements=%s health=%s",
+        measurements_loaded,
+        health_loaded
+    )
+
     return {
-        "measurements_loaded": measurements_added,
-        "health_loaded": health_added
+        "measurements_loaded": measurements_loaded,
+        "health_loaded": health_loaded
     }
 
 
