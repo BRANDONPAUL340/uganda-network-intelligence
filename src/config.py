@@ -1,27 +1,12 @@
 import os
-
 from dotenv import load_dotenv
 
-
+# 🔍 Locate, decrypt, and load local environment key-value pairs into system memory
 load_dotenv()
 
-
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv(
-    "DB_NAME",
-    "network_intelligence"
-)
-DB_USER = os.getenv(
-    "DB_USER",
-    "postgres"
-)
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-
-
-# High-performance psycopg v3 driver URL format construction
-DATABASE_URL = (
-    f"postgresql+psycopg://"
-    f"{DB_USER}:{DB_PASSWORD}@"
-    f"{DB_HOST}:{DB_PORT}/{DB_NAME}"
-)
+# Extract variables from system memory with strict fail-safe fallbacks
+DATABASE_HOST = os.getenv("DATABASE_HOST", "localhost")
+DATABASE_PORT = os.getenv("DATABASE_PORT", "5432")
+DATABASE_NAME = os.getenv("DATABASE_NAME", "network_intelligence")
+DATABASE_USER = os.getenv("DATABASE_USER", "postgres")
+DATABASE_PASSWORD = os.getenv("DATABASE_PASSWORD", "tech")
