@@ -20,3 +20,5 @@ Thumbs.db
 
 # Logs
 *.log
+# 📝 Exclude dynamic runtime tracking trace log diaries
+logs/*.log

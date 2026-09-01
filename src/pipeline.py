@@ -11,16 +11,18 @@ from src.transformation.silver import run_silver
 from src.transformation.gold import run_gold
 
 
+PIPELINE_NAME = "uganda_network_intelligence"
+
 # Initialize our central orchestrator logger utility instance
 logger = get_logger(__name__)
-
-PIPELINE_NAME = "uganda_network_intelligence"
 
 
 def start_pipeline_run():
     """
     Create a new pipeline audit record.
     """
+    logger.info("Creating pipeline run record in the database.")
+    
     sql = """
     INSERT INTO pipeline_runs (
         pipeline_name,
@@ -42,7 +44,10 @@ def start_pipeline_run():
                 "started_at": datetime.now(),
             }
         )
-        return result.scalar()
+        run_id = result.scalar()
+        
+        logger.info("Pipeline run record created. run_id=%s", run_id)
+        return run_id
 
 
 def finish_pipeline_run(
@@ -101,11 +106,8 @@ def finish_pipeline_run(
 
 def main():
     logger.info("=" * 60)
-    logger.info("UGANDA NETWORK & SERVICE INTELLIGENCE ORCHESTRATOR")
+    logger.info("UGANDA NETWORK & SERVICE INTELLIGENCE")
     logger.info("=" * 60)
-
-    run_id = start_pipeline_run()
-    logger.info(f"Pipeline run ID: {run_id}")
 
     # Initialize stage metric dictionaries cleanly to protect against crash scopes
     ingestion_metrics = {}
@@ -113,32 +115,41 @@ def main():
     silver_metrics = {}
     gold_metrics = {}
 
+    run_id = start_pipeline_run()
+    logger.info("Pipeline run started. run_id=%s", run_id)
+
     try:
         # -------------------------------------------------
         # 1. INGESTION
         # -------------------------------------------------
+        logger.info("Starting ingestion stage.")
         ingestion_metrics = run_ingestion()
+        logger.info("Ingestion stage completed.")
 
         # -------------------------------------------------
         # 2. DATA QUALITY
         # -------------------------------------------------
+        logger.info("Starting data quality stage.")
         quality_metrics = run_data_quality(run_id)
 
         if quality_metrics.get("failed_checks", 0) > 0:
-            raise RuntimeError(
-                f"Data-quality checks failed. "
-                f"Flagged {quality_metrics['failed_checks']} validation anomalies."
-            )
+            raise RuntimeError("Data-quality checks failed.")
+
+        logger.info("Data quality gate passed.")
 
         # -------------------------------------------------
         # 3. SILVER
         # -------------------------------------------------
+        logger.info("Starting Silver transformation.")
         silver_metrics = run_silver()
+        logger.info("Silver transformation completed.")
 
         # -------------------------------------------------
         # 4. GOLD
         # -------------------------------------------------
+        logger.info("Starting Gold transformation.")
         gold_metrics = run_gold()
+        logger.info("Gold transformation completed.")
 
         # -------------------------------------------------
         # 5. SUCCESS PATH
@@ -154,12 +165,14 @@ def main():
             quality_checks_run=quality_metrics.get("checks_run", 0),
             quality_checks_failed=quality_metrics.get("failed_checks", 0)
         )
-        logger.info("🎉 Complete Medallion architecture chain finished successfully.")
+        logger.info("Pipeline completed successfully. run_id=%s", run_id)
 
     except Exception as error:
         # -------------------------------------------------
-        # 6. FAILURE PATH (Maintains full tracking states)
+        # 6. FAILURE PATH
         # -------------------------------------------------
+        logger.exception("Pipeline failed. run_id=%s", run_id)
+
         finish_pipeline_run(
             run_id=run_id,
             status="FAILED",
@@ -172,8 +185,6 @@ def main():
             quality_checks_failed=quality_metrics.get("failed_checks", 0),
             error_message=str(error)
         )
-        logger.error("Pipeline failed.")
-        logger.error(f"Error: {error}")
         raise
 
 

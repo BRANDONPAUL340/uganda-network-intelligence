@@ -1,25 +1,38 @@
 import logging
+from pathlib import Path
 
 
-def get_logger(name):
+LOG_DIR = Path("logs")
+LOG_DIR.mkdir(exist_ok=True)
+
+LOG_FILE = LOG_DIR / "pipeline.log"
+
+
+def get_logger(name="uganda_network_intelligence"):
 
     logger = logging.getLogger(name)
 
-    if not logger.handlers:
+    if logger.handlers:
+        return logger
 
-        logger.setLevel(logging.INFO)
+    logger.setLevel(logging.INFO)
 
-        handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+    )
 
-        formatter = logging.Formatter(
-            "%(asctime)s | "
-            "%(levelname)s | "
-            "%(name)s | "
-            "%(message)s"
-        )
+    file_handler = logging.FileHandler(
+        LOG_FILE,
+        encoding="utf-8"
+    )
 
-        handler.setFormatter(formatter)
+    file_handler.setFormatter(formatter)
 
-        logger.addHandler(handler)
+    console_handler = logging.StreamHandler()
+
+    console_handler.setFormatter(formatter)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
 
     return logger
