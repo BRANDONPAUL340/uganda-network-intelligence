@@ -62,3 +62,23 @@ The platform processes network monitoring telemetry through a fully automated, s
 7. **Pipeline Run Auditing:** Logs microsecond runtime speeds, error trace records, and volumetric data balances down to a central tracking ledger table.
 
 The ingestion framework is designed to be completely **idempotent**, using a natural composite business key combination (**`equipment_id` + `measured_at`**) as a uniqueness firewall to confidently block duplicate measurements without throwing platform errors or corrupting your analytical trends.
+## 🧪 Automated Testing & Continuous Integration (CI)
+
+The platform utilizes a comprehensive automated testing framework powered by `pytest` to continuously validate structural data flow, environment integrity, and core business rules across all Medallion tiers.
+
+### Running the Test Suite
+
+To execute a complete end-to-end continuous integration verification sweep across the entire warehouse stack, ensure your virtual sandbox environment is active and run:
+
+```bash
+python -m pytest -v
+```
+
+### Verified Structural Checkpoints
+The test runner executes 16 atomic validation assertions covering:
+* **Infrastructure Links:** Validates high-availability PostgreSQL connectivity handshakes.
+* **Schema Blueprints:** Verifies core staging, reference, Silver, and Gold tables are properly provisioned on disk.
+* **Data Governance Rules:** Asserts pre-transformation datasets contain zero unmapped orphan references or required null keys.
+* **Idempotency Protections:** Programmatically proves the Silver layer remains 100% duplicate-free during repeated pipeline runs.
+* **Business Logic Matrix:** Verifies telecommunications network health features map values strictly within corporate domain guidelines.
+* **Orchestration Auditing:** Audits the tracking journal layer to ensure run statuses match standard operational rules.
