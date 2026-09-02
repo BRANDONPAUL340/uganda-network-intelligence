@@ -127,3 +127,36 @@ def test_pipeline_has_valid_status():
     with engine.connect() as connection:
         invalid_count = connection.execute(text(sql)).scalar()
     assert invalid_count == 0
+def test_pipeline_runs_have_metrics():
+    """
+    ARRANGE, ACT & ASSERT: Verifies that our runtime metrics tracking columns 
+    are properly initialized and populated with numeric data inside the ledger.
+    """
+    sql = """
+    SELECT COUNT(*)
+    FROM pipeline_runs
+    WHERE quality_checks_passed IS NOT NULL
+      AND silver_records_processed IS NOT NULL
+      AND gold_records_processed IS NOT NULL;
+    """
+    with engine.connect() as connection:
+        count = connection.execute(text(sql)).scalar()
+    assert count > 0
+
+
+def test_successful_runs_have_valid_counts():
+    """
+    ARRANGE, ACT & ASSERT: Enforces business logic integrity guards by verifying 
+    that zero successful pipeline executions record impossible negative row values.
+    """
+    sql = """
+    SELECT COUNT(*)
+    FROM pipeline_runs
+    WHERE status = 'SUCCESS'
+      AND records_processed < 0
+       OR status = 'SUCCESS'
+      AND quality_checks_passed < 0;
+    """
+    with engine.connect() as connection:
+        count = connection.execute(text(sql)).scalar()
+    assert count == 0

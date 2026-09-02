@@ -129,10 +129,33 @@ def upsert_site_daily_performance(row):
 def create_gold_equipment_health():
     """
     Refreshes equipment hardware health summaries.
+    Returns the total number of records processed inside the equipment summary matrix table.
     """
     logger.info("Refreshing gold_equipment_health metrics matrix...")
     sql = """
-    CREATE TABLE IF NOT EXISTS gold_equipment_health AS
+    CREATE TABLE IF NOT EXISTS gold_equipment_health (
+        equipment_id INT,
+        equipment_type VARCHAR(50),
+        manufacturer VARCHAR(50),
+        model VARCHAR(50),
+        measurement_count INT,
+        avg_latency_ms NUMERIC,
+        avg_packet_loss_pct NUMERIC,
+        avg_signal_strength_dbm NUMERIC,
+        avg_availability_pct NUMERIC,
+        health_status VARCHAR(20),
+        record_count INT DEFAULT 0,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (equipment_id)
+    );
+    """
+    refresh_sql = """
+    TRUNCATE TABLE gold_equipment_health;
+    INSERT INTO gold_equipment_health (
+        equipment_id, equipment_type, manufacturer, model, measurement_count,
+        avg_latency_ms, avg_packet_loss_pct, avg_signal_strength_dbm, avg_availability_pct,
+        health_status, record_count, updated_at
+    )
     SELECT
         equipment_id, equipment_type, manufacturer, model, COUNT(*) AS measurement_count,
         ROUND(AVG(latency_ms), 2) AS avg_latency_ms,
@@ -143,37 +166,23 @@ def create_gold_equipment_health():
             WHEN AVG(availability_pct) < 95 OR AVG(packet_loss_pct) > 5 OR AVG(latency_ms) > 70 THEN 'Critical'
             WHEN AVG(availability_pct) < 98 OR AVG(packet_loss_pct) > 2 OR AVG(latency_ms) > 40 THEN 'Warning'
             ELSE 'Healthy'
-        END AS health_status
-    FROM silver_measurements
-    GROUP BY equipment_id, equipment_type, manufacturer, model;
-    """
-    refresh_sql = """
-    TRUNCATE TABLE gold_equipment_health;
-    INSERT INTO gold_equipment_health
-    SELECT
-        equipment_id, equipment_type, manufacturer, model, COUNT(*),
-        ROUND(AVG(latency_ms), 2), ROUND(AVG(packet_loss_pct), 2),
-        ROUND(AVG(signal_strength_dbm), 2), ROUND(AVG(availability_pct), 2),
-        CASE
-            WHEN AVG(availability_pct) < 95 OR AVG(packet_loss_pct) > 5 OR AVG(latency_ms) > 70 THEN 'Critical'
-            WHEN AVG(availability_pct) < 98 OR AVG(packet_loss_pct) > 2 OR AVG(latency_ms) > 40 THEN 'Warning'
-            ELSE 'Healthy'
-        END
+        END AS health_status,
+        COUNT(*) AS record_count,
+        CURRENT_TIMESTAMP
     FROM silver_measurements
     GROUP BY equipment_id, equipment_type, manufacturer, model;
     """
     with engine.begin() as connection:
         connection.execute(text(sql))
-        connection.execute(text(refresh_sql))
-    logger.info("gold_equipment_health tracking matrix successfully updated.")
+        result = connection.execute(text(refresh_sql))
+        logger.info("gold_equipment_health tracking matrix successfully updated.")
+        return result.rowcount
 
 
 def run_incremental_gold():
     """
     Orchestrates the high-performance incremental aggregation runner loop.
     """
-    logger.info("--- INCREMENTAL GOLD LAYER ---")
-
     batch_id = get_latest_successful_batch()
 
     if batch_id is None:
@@ -204,13 +213,14 @@ def run_gold():
     """
     logger.info("--- GOLD LAYER ---")
     
-    processed = run_incremental_gold()
-    
-    # Maintain equipment matrices configurations
-    create_gold_equipment_health()
+    # 📊 Extract separate row metrics from both structural processes
+    site_performance_count = run_incremental_gold()
+    equipment_health_count = create_gold_equipment_health()
 
+    # 🔑 Connected: Returns both distinct dictionary keys to satisfy pipeline.py indexes
     return {
-        "gold_records_processed": processed
+        "site_daily_performance": site_performance_count,
+        "equipment_health": equipment_health_count
     }
 
 

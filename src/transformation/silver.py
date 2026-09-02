@@ -3,7 +3,7 @@ from sqlalchemy import text
 from src.database import engine
 from src.logger import get_logger
 
-# Initialize module-level logger instance
+# 🛠️ Hardened: Instantiating centralized module logger context name
 logger = get_logger(__name__)
 
 
@@ -12,7 +12,7 @@ def upgrade_silver_schemas():
     Programmatically patches existing Silver tables to ensure they have 
     the necessary primary key constraints and lineage columns without losing data.
     """
-    logger.info("Shielding, altering, and upgrading Silver schemas.")
+    logger.info("Checking Silver schema")
     
     alter_cols_sql = """
     ALTER TABLE silver_measurements 
@@ -37,14 +37,15 @@ def upgrade_silver_schemas():
         try:
             connection.execute(text(alter_keys_sql))
         except Exception:
-            pass
+            # ⚠️ Upgraded: Informational index checks route cleanly to WARNING streams
+            logger.warning("Primary key already active on silver_measurements")
             
         try:
             connection.execute(text(alter_health_keys_sql))
         except Exception:
-            pass
+            logger.warning("Primary key already active on silver_network_health")
             
-    logger.info("Silver schemas successfully upgraded and indexed.")
+    logger.info("Silver schema upgrade completed")
 
 
 def get_latest_successful_batch_id():
@@ -68,7 +69,7 @@ def load_silver_measurements(batch_id):
         logger.info("No successful source batches found. Skipping Silver measurements load.")
         return 0
 
-    logger.info("Checking for new measurements to load into Silver.")
+    logger.info("Loading new measurements into Silver")
 
     sql = """
     INSERT INTO silver_measurements (
@@ -91,7 +92,9 @@ def load_silver_measurements(batch_id):
     with engine.begin() as connection:
         result = connection.execute(text(sql), {"batch_id": batch_id})
         records_loaded = result.rowcount
-        logger.info("Silver measurements loaded: %s new records.", records_loaded)
+        
+        # 📊 Structured: Key-value pipeline tracking properties
+        logger.info(f"New Silver measurements loaded | records={records_loaded}")
         return records_loaded
 
 
@@ -103,7 +106,7 @@ def load_silver_network_health(batch_id):
         logger.info("No successful source batches found. Skipping Silver health calculation.")
         return 0
 
-    logger.info("Checking for new network-health records.")
+    logger.info("Loading network health")
 
     sql = """
     INSERT INTO silver_network_health (
@@ -129,7 +132,8 @@ def load_silver_network_health(batch_id):
     with engine.begin() as connection:
         result = connection.execute(text(sql), {"batch_id": batch_id})
         records_loaded = result.rowcount
-        logger.info("Network-health records loaded: %s new records.", records_loaded)
+        
+        logger.info(f"New network-health records loaded | records={records_loaded}")
         return records_loaded
 
 

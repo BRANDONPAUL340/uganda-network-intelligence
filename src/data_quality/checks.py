@@ -17,7 +17,6 @@ def check_sites_for_nulls():
        OR site_type IS NULL
        OR status IS NULL;
     """
-
     with engine.connect() as connection:
         result = connection.execute(text(sql))
         return result.scalar() == 0
@@ -33,7 +32,6 @@ def check_duplicate_sites():
         HAVING COUNT(*) > 1
     ) duplicates;
     """
-
     with engine.connect() as connection:
         result = connection.execute(text(sql))
         return result.scalar() == 0
@@ -58,7 +56,6 @@ def check_measurement_ranges():
             AND availability_pct NOT BETWEEN 0 AND 100
         );
     """
-
     with engine.connect() as connection:
         result = connection.execute(text(sql))
         return result.scalar() == 0
@@ -72,7 +69,6 @@ def check_orphan_equipment():
         ON e.site_id = s.site_id
     WHERE s.site_id IS NULL;
     """
-
     with engine.connect() as connection:
         result = connection.execute(text(sql))
         return result.scalar() == 0
@@ -103,7 +99,6 @@ def check_incident_dates():
     WHERE end_time IS NOT NULL
       AND end_time < start_time;
     """
-
     with engine.connect() as connection:
         result = connection.execute(text(sql))
         return result.scalar() == 0
@@ -127,15 +122,12 @@ def run_data_quality_checks():
 
     for check_name, passed in checks.items():
         status = "PASS" if passed else "FAIL"
-        
-        # Output clean metrics to console standard output
         print(f"{check_name}: {status}")
 
-        # Stream structured levels into logs/pipeline.log
         if passed:
             logger.info("✅ PASS | %s", check_name)
         else:
-            logger.error("❌ FAIL | %s | Non-compliant records detected!", check_name)
+            logger.error("❌ FAIL | %s | Data quality issue caught!", check_name)
             all_passed = False
 
     if all_passed:
@@ -143,13 +135,16 @@ def run_data_quality_checks():
     else:
         logger.warning("⚠️ Critical data governance anomalies flagged inside checks framework.")
 
-    return all_passed
+    # 🔑 Connected: Yields the structural dictionary payload to prevent script crashes
+    return {
+        "passed": all_passed,
+        "checks": checks,
+    }
 
 
 if __name__ == "__main__":
-    passed = run_data_quality_checks()
-
-    if passed:
+    passed_dict = run_data_quality_checks()
+    if passed_dict["passed"]:
         print("\nAll data-quality checks passed.")
     else:
         print("\nData-quality checks failed.")

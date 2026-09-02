@@ -1,24 +1,21 @@
-# Python
-__pycache__/
-*.py[cod]
+# 🔒 Git Version Control Ignore Mask Rules Vault
 
-# Virtual environment
+# 🐍 Python Sandbox Local Virtual Environments
 .venv/
+env/
+ENV/
+vh/
 
-# Environment variables
-.env
+# 🧪 Compiled Bytecode Binary Caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
 
-# Jupyter
-.ipynb_checkpoints/
-
-# IDE
-.vscode/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
+# 📝 Dynamic Runtime Tracking Logs Diaries
+logs/
 *.log
-# 📝 Exclude dynamic runtime tracking trace log diaries
-logs/*.log
+
+# 🔒 Critical Security Gate: Local Production Environment Secrets
+.env
