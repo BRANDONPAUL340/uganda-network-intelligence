@@ -11,7 +11,9 @@ from src.transformation.silver import run_silver
 from src.transformation.gold import run_gold
 
 
-PIPELINE_NAME = "uganda_network_intelligence"
+# 🔑 Connected: Central configuration routing
+from src.config import PIPELINE_NAME, ENVIRONMENT
+
 
 # Initialize our central orchestrator logger utility instance
 logger = get_logger(__name__)

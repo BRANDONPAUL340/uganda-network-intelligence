@@ -2,38 +2,50 @@ import os
 
 from dotenv import load_dotenv
 
-
+# 🔍 Locate, decrypt, and load local environment key-value pairs into system memory
 load_dotenv()
 
+# Extract database parameters with fallback settings
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME", "network_intelligence")
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "tech")
 
-DATABASE_HOST = os.getenv(
-    "DATABASE_HOST",
-    "localhost"
+# Extract operational pipeline metadata fields
+PIPELINE_NAME = os.getenv(
+    "PIPELINE_NAME",
+    "uganda_network_intelligence"
 )
 
-DATABASE_PORT = os.getenv(
-    "DATABASE_PORT",
-    "5432"
-)
-
-DATABASE_NAME = os.getenv(
-    "DATABASE_NAME",
-    "network_intelligence"
-)
-
-DATABASE_USER = os.getenv(
-    "DATABASE_USER",
-    "postgres"
-)
-
-DATABASE_PASSWORD = os.getenv(
-    "DATABASE_PASSWORD", "tech"
+ENVIRONMENT = os.getenv(
+    "ENVIRONMENT",
+    "development"
 )
 
 
-if not DATABASE_PASSWORD:
+def validate_config():
+    """
+    Evaluates system memory to ensure all critical environment parameters 
+    are populated before allowing execution.
+    """
+    required = {
+        "DB_HOST": DB_HOST,
+        "DB_PORT": DB_PORT,
+        "DB_NAME": DB_NAME,
+        "DB_USER": DB_USER,
+        "DB_PASSWORD": DB_PASSWORD,
+        "PIPELINE_NAME": PIPELINE_NAME,
+    }
 
-    raise RuntimeError(
-        "DATABASE_PASSWORD is not configured. "
-        "Please set it in the .env file."
-    )
+    missing = [
+        key
+        for key, value in required.items()
+        if not value
+    ]
+
+    if missing:
+        raise RuntimeError(
+            "Missing required configuration: "
+            + ", ".join(missing)
+        )
