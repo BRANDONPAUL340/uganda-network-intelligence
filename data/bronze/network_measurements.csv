@@ -9,3 +9,5 @@ equipment_id,site_id,measured_at,traffic_mb,latency_ms,packet_loss_pct,signal_st
 4,4,2026-09-02 08:35:00,9100.25,31.50,0.90,-61.30,98.60
 1,1,2026-09-03 08:00:00,14200.50,22.10,0.30,-57.00,99.80
 
+
+
