@@ -11,14 +11,11 @@ from src.data_quality.checks import run_data_quality_checks
 from src.transformation.silver import run_silver
 from src.transformation.gold import run_gold
 
-# Initialize our central orchestrator logger utility instance
+# Initialize central master pipeline orchestrator logger instance
 logger = get_logger(__name__)
 
 
 def start_pipeline_run():
-    """
-    Create a new pipeline audit record.
-    """
     logger.info("Creating pipeline run record in the database.")
     sql = """
     INSERT INTO pipeline_runs (
@@ -55,9 +52,6 @@ def finish_pipeline_run(
     gold_records_processed=0,
     error_message=None
 ):
-    """
-    Update the pipeline audit record with granular end-to-end metrics when the run finishes.
-    """
     sql = """
     UPDATE pipeline_runs
     SET
@@ -98,7 +92,7 @@ def main():
     print("=" * 60)
 
     # Initialize tracking metric holders to guarantee safety boundary defaults
-    ingestion_result = {"source_records": 0, "inserted_records": 0, "skipped_records": 0}
+    ingestion_result = {"source_records": 0, "inserted_records": 0, "rejected_records": 0}
     silver_metrics = {"measurements_loaded": 0, "health_loaded": 0}
     gold_metrics = {"site_daily_performance": 0, "equipment_health": 0}
     quality_checks_passed = 0
@@ -110,7 +104,7 @@ def main():
 
     try:
         # -------------------------------------------------
-        # 1. INGESTION
+        # 1. INGESTION WITH INTEGRATED DATA QUARANTINE
         # -------------------------------------------------
         logger.info(f"Starting ingestion stage | run_id={run_id}")
         ingestion_result = run_ingestion()
@@ -118,7 +112,7 @@ def main():
         print("\nIngestion summary:")
         print(f"  Source records: {ingestion_result['source_records']}")
         print(f"  Inserted records: {ingestion_result['inserted_records']}")
-        print(f"  Skipped records: {ingestion_result['skipped_records']}")
+        print(f"  Rejected records: {ingestion_result['rejected_records']}")
         logger.info(f"Ingestion stage completed successfully | run_id={run_id}")
 
         # -------------------------------------------------
@@ -187,9 +181,6 @@ def main():
         print("\nPipeline completed successfully.")
 
     except Exception as error:
-        # -------------------------------------------------
-        # 6. FAILURE PATH OVERRIDES
-        # -------------------------------------------------
         pipeline_duration = time.time() - pipeline_start
         logger.error(f"Pipeline failed | run_id={run_id} | error={error}")
 

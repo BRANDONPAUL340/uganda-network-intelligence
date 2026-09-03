@@ -2,7 +2,10 @@ import pytest
 
 from src.ingestion.measurements import (
     create_source_record_id,
-    validate_measurement,
+)
+from src.data_quality.measurements import (
+    validate_record,
+    get_validation_failure,
 )
 
 
@@ -21,7 +24,6 @@ def test_source_record_id_is_deterministic():
     first = create_source_record_id(record)
     second = create_source_record_id(record)
 
-    # Assert that the signatures are non-volatile and perfectly equal
     assert first == second
     assert first == "1_1_2026-09-02 08:00:00"
 
@@ -29,8 +31,7 @@ def test_source_record_id_is_deterministic():
 def test_missing_field_is_rejected():
     """
     ARRANGE, ACT & ASSERT: Verifies that your structural contract validation 
-    shields successfully intercept incomplete source records. If a record lacks 
-    required metric elements, the function must throw an immediate ValueError exception.
+    shields successfully intercept incomplete source records using our updated framework.
     """
     # This sample dictionary record misses vital metrics fields (traffic, latency, etc.)
     record = {
@@ -39,8 +40,10 @@ def test_missing_field_is_rejected():
         "measured_at": "2026-09-02 08:00:00",
     }
 
+    # Evaluate the row through the centralized validate_record chain
+    checks = validate_record(record)
+    reason = get_validation_failure(checks)
+
     # Assert that the validation firewall actively catches the data-shape violation
-    with pytest.raises(ValueError) as exc_info:
-        validate_measurement(record)
-        
-    assert "Missing required field" in str(exc_info.value)
+    assert reason is not None
+    assert "Missing fields" in reason

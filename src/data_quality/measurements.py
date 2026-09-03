@@ -1,116 +1,270 @@
-import csv
 from datetime import datetime
-from pathlib import Path
-
 from sqlalchemy import text
-
 from src.database import engine
 from src.logger import get_logger
-from src.data_quality.measurements import validate_record  # 🔑 Connective Link
 
 # Initialize module-level logger instance
 logger = get_logger(__name__)
 
-# Landing path for incoming raw network file packets
-SOURCE_FILE = Path("data/bronze/network_measurements.csv")
 
+def check_required_fields(record):
+    """Asserts the physical presence of all required attributes."""
+    required_fields = [
+        "equipment_id",
+        "site_id",
+        "measured_at",
+        "traffic_mb",
+        "latency_ms",
+        "packet_loss_pct",
+        "signal_strength_dbm",
+        "availability_pct",
+    ]
 
-def read_measurements():
-    """
-    Safely opens and extracts raw dictionary records from the landing file.
-    """
-    logger.info(f"Reading measurement source | file={SOURCE_FILE}")
+    missing = [
+        field
+        for field in required_fields
+        if not record.get(field) or str(record.get(field)).strip() == ""
+    ]
 
-    if not SOURCE_FILE.exists():
-        raise FileNotFoundError(f"Source file not found at landing path: {SOURCE_FILE}")
-
-    with SOURCE_FILE.open("r", encoding="utf-8", newline="") as file:
-        reader = csv.DictReader(file)
-        records = list(reader)
-
-    logger.info(f"Source records read | records={len(records)}")
-    return records
-
-
-def create_source_record_id(record):
-    """
-    Generates a deterministic natural composite string key identifier.
-    """
-    return (
-        f"{record['equipment_id'].strip()}_"
-        f"{record['site_id'].strip()}_"
-        f"{record['measured_at'].strip()}"
-    )
-
-
-def insert_measurements(records):
-    """
-    Validates rows via the comprehensive data quality engine before writing to staging.
-    Trips an immediate circuit breaker if anomalies are caught.
-    """
-    sql = """
-    INSERT INTO measurements (
-        equipment_id, site_id, measured_at, traffic_mb, latency_ms,
-        packet_loss_pct, signal_strength_dbm, availability_pct, source_record_id
-    )
-    VALUES (
-        :equipment_id, :site_id, :measured_at, :traffic_mb, :latency_ms,
-        :packet_loss_pct, :signal_strength_dbm, :availability_pct, :source_record_id
-    )
-    ON CONFLICT (source_record_id) DO NOTHING;
-    """
-
-    inserted = 0
-
-    with engine.begin() as connection:
-        for record in records:
-            # 🛡️ Data Quality Firewall Gateway Rule Interception
-            checks = validate_record(record)
-            if not all(check["passed"] for check in checks):
-                failed_checks = [c for check in checks if not check["passed"]]
-                raise ValueError(f"Data quality validation failed: {failed_checks}")
-
-            result = connection.execute(
-                text(sql),
-                {
-                    "equipment_id": int(record["equipment_id"]),
-                    "site_id": int(record["site_id"]),
-                    "measured_at": datetime.strptime(record["measured_at"].strip(), "%Y-%m-%d %H:%M:%S"),
-                    "traffic_mb": float(record["traffic_mb"]),
-                    "latency_ms": float(record["latency_ms"]),
-                    "packet_loss_pct": float(record["packet_loss_pct"]),
-                    "signal_strength_dbm": float(record["signal_strength_dbm"]),
-                    "availability_pct": float(record["availability_pct"]),
-                    "source_record_id": create_source_record_id(record),
-                }
-            )
-            inserted += result.rowcount
-
-    logger.info(f"Measurements inserted | records={inserted}")
-    return inserted
-
-
-def run_ingestion():
-    """
-    Unified ingestion runner module entry point.
-    """
-    logger.info("--- INGESTION LAYER ---")
-
-    records = read_measurements()
-    inserted = insert_measurements(records)
-    skipped = len(records) - inserted
-
-    logger.info(
-        f"Ingestion completed | source_records={len(records)} | "
-        f"inserted_records={inserted} | skipped_records={skipped}"
-    )
+    if missing:
+        return {
+            "passed": False,
+            "check": "required_fields",
+            "message": f"Missing fields: {', '.join(missing)}",
+        }
 
     return {
-        "source_records": len(records),
-        "inserted_records": inserted,
-        "skipped_records": skipped,
+        "passed": True,
+        "check": "required_fields",
+        "message": "All required fields present",
     }
 
 
+def check_numeric_fields(record):
+    """Verifies that raw text strings can parse cleanly into numbers."""
+    numeric_fields = [
+        "traffic_mb",
+        "latency_ms",
+        "packet_loss_pct",
+        "signal_strength_dbm",
+        "availability_pct",
+    ]
+
+    try:
+        for field in numeric_fields:
+            float(record[field])
+    except (TypeError, ValueError):
+        return {
+            "passed": False,
+            "check": "numeric_fields",
+            "message": "Invalid numeric value",
+        }
+
+    return {
+        "passed": True,
+        "check": "numeric_fields",
+        "message": "Numeric values valid",
+    }
+
+
+def check_metric_ranges(record):
+    """Enforces boundaries reflecting physical network constraints."""
+    try:
+        traffic = float(record["traffic_mb"])
+        latency = float(record["latency_ms"])
+        packet_loss = float(record["packet_loss_pct"])
+        availability = float(record["availability_pct"])
+    except (TypeError, ValueError):
+        return {
+            "passed": False,
+            "check": "metric_ranges",
+            "message": "Range check bypassed: Invalid numeric types",
+        }
+
+    if traffic < 0:
+        return {
+            "passed": False,
+            "check": "metric_ranges",
+            "message": "Traffic cannot be negative",
+        }
+
+    if latency < 0:
+        return {
+            "passed": False,
+            "check": "metric_ranges",
+            "message": "Latency cannot be negative",
+        }
+
+    if not 0 <= packet_loss <= 100:
+        return {
+            "passed": False,
+            "check": "metric_ranges",
+            "message": "Packet loss must be between 0 and 100",
+        }
+
+    if not 0 <= availability <= 100:
+        return {
+            "passed": False,
+            "check": "metric_ranges",
+            "message": "Availability must be between 0 and 100",
+        }
+
+    return {
+        "passed": True,
+        "check": "metric_ranges",
+        "message": "Network metric ranges valid",
+    }
+
+
+def check_timestamp(record):
+    """Validates chronology string mask adherence."""
+    try:
+        datetime.strptime(record["measured_at"].strip(), "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return {
+            "passed": False,
+            "check": "timestamp",
+            "message": "Invalid measurement timestamp",
+        }
+
+    return {
+        "passed": True,
+        "check": "timestamp",
+        "message": "Timestamp valid",
+    }
+
+
+def check_reference_data(record):
+    """Queries relational tables to intercept invalid site or equipment reference mappings."""
+    sql = """
+    SELECT
+        EXISTS (
+            SELECT 1
+            FROM sites
+            WHERE site_id = :site_id
+        ) AS site_exists,
+
+        EXISTS (
+            SELECT 1
+            FROM equipment
+            WHERE equipment_id = :equipment_id
+        ) AS equipment_exists;
+    """
+    try:
+        with engine.connect() as connection:
+            result = connection.execute(
+                text(sql),
+                {
+                    "site_id": int(record["site_id"]),
+                    "equipment_id": int(record["equipment_id"]),
+                },
+            ).mappings().one()
+    except (TypeError, ValueError):
+        return {
+            "passed": False,
+            "check": "reference_data",
+            "message": "Invalid site_id or equipment_id data type supplied",
+        }
+
+    if not result["site_exists"]:
+        return {
+            "passed": False,
+            "check": "site_reference",
+            "message": f"Site {record['site_id']} does not exist",
+        }
+
+    if not result["equipment_exists"]:
+        return {
+            "passed": False,
+            "check": "equipment_reference",
+            "message": f"Equipment {record['equipment_id']} does not exist",
+        }
+
+    return {
+        "passed": True,
+        "check": "reference_data",
+        "message": "Site and equipment references valid",
+    }
+
+
+def validate_record(record):
+    """Orchestrates sequential validation steps for a record row."""
+    checks = [check_required_fields(record)]
+    if not checks[-1]["passed"]:
+        return checks
+
+    checks.append(check_numeric_fields(record))
+    if not checks[-1]["passed"]:
+        return checks
+
+    checks.append(check_metric_ranges(record))
+    if not checks[-1]["passed"]:
+        return checks
+
+    checks.append(check_timestamp(record))
+    if not checks[-1]["passed"]:
+        return checks
+
+    checks.append(check_reference_data(record))
+    return checks
+
+
+def get_validation_failure(checks):
+    """Scans checks results and returns the first failure message text caught."""
+    for check in checks:
+        if not check["passed"]:
+            return check["message"]
+    return None
+
+
+def summarize_quality(records):
+    """Evaluates an array of records and outputs a quality scorecard metadata map."""
+    total = len(records)
+    passed = 0
+    failed = 0
+    failures = []
+
+    for record in records:
+        checks = validate_record(record)
+        record_passed = all(check["passed"] for check in checks)
+
+        if record_passed:
+            passed += 1
+        else:
+            failed += 1
+            failures.append({
+                "record": record,
+                "checks": checks,
+            })
+
+    summary = {
+        "total_records": total,
+        "passed_records": passed,
+        "failed_records": failed,
+        "quality_rate": (passed / total * 100 if total > 0 else 0),
+        "failures": failures,
+    }
+
+    logger.info(
+        f"Data quality summary | total={total} | passed={passed} | "
+        f"failed={failed} | quality_rate={summary['quality_rate']:.2f}%"
+    )
+
+    return summary
+
+
 if __name__ == "__main__":
-    run_ingestion()
+    from src.ingestion.measurements import read_measurements
+
+    try:
+        raw_records = read_measurements()
+        quality_summary = summarize_quality(raw_records)
+
+        print("\nDATA QUALITY SUMMARY")
+        print("=" * 40)
+        print(f"Total records:  {quality_summary['total_records']}")
+        print(f"Passed records: {quality_summary['passed_records']}")
+        print(f"Failed records: {quality_summary['failed_records']}")
+        print(f"Quality rate:   {quality_summary['quality_rate']:.2f}%")
+    except Exception as err:
+        print(f"\nExecution crash: {err}")
