@@ -135,23 +135,27 @@ def insert_measurements(records):
 def run_ingestion():
     """
     Unified ingestion runner module entry point.
+    Calculates source, inserted, and skipped records for metadata tracking.
     """
     logger.info("--- INGESTION LAYER ---")
 
-    records = read_measurements()
-    inserted = insert_measurements(records)
+    try:
+        records = read_measurements()
+        inserted = insert_measurements(records)
+        skipped = len(records) - inserted
 
-    logger.info(
-        f"Ingestion completed | "
-        f"source_records={len(records)} | "
-        f"inserted_records={inserted}"
-    )
+        logger.info(
+            f"Ingestion completed | "
+            f"source_records={len(records)} | "
+            f"inserted_records={inserted} | "
+            f"skipped_records={skipped}"
+        )
 
-    return {
-        "source_records": len(records),
-        "inserted_records": inserted,
-    }
-
-
-if __name__ == "__main__":
-    run_ingestion()
+        return {
+            "source_records": len(records),
+            "inserted_records": inserted,
+            "skipped_records": skipped,
+        }
+    except Exception as err:
+        logger.error(f"Ingestion layer encountered a critical failure: {err}")
+        raise

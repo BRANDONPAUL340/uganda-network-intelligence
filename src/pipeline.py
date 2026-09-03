@@ -3,6 +3,7 @@ import time
 
 from sqlalchemy import text
 
+from src.config import PIPELINE_NAME
 from src.database import engine
 from src.ingestion.measurements import run_ingestion
 from src.logger import get_logger
@@ -10,22 +11,8 @@ from src.data_quality.checks import run_data_quality_checks
 from src.transformation.silver import run_silver
 from src.transformation.gold import run_gold
 
-
-# 🔑 Connected: Central configuration routing
-from src.config import PIPELINE_NAME, ENVIRONMENT
-
-
 # Initialize our central orchestrator logger utility instance
 logger = get_logger(__name__)
-
-
-def get_source_record_count():
-    """
-    Computes the total number of raw rows currently sitting in the staging table.
-    """
-    sql = "SELECT COUNT(*) FROM measurements;"
-    with engine.connect() as connection:
-        return connection.execute(text(sql)).scalar()
 
 
 def start_pipeline_run():
@@ -33,7 +20,6 @@ def start_pipeline_run():
     Create a new pipeline audit record.
     """
     logger.info("Creating pipeline run record in the database.")
-    
     sql = """
     INSERT INTO pipeline_runs (
         pipeline_name,
@@ -56,7 +42,7 @@ def start_pipeline_run():
             }
         )
         run_id = result.scalar()
-        logger.info("Pipeline run record created in database. run_id=%s", run_id)
+        logger.info(f"Pipeline run record created in database. run_id={run_id}")
         return run_id
 
 
@@ -87,9 +73,7 @@ def finish_pipeline_run(
         error_message = :error_message
     WHERE run_id = :run_id;
     """
-
     completed_at = datetime.now()
-
     with engine.begin() as connection:
         connection.execute(
             text(sql),
@@ -109,20 +93,19 @@ def finish_pipeline_run(
 def main():
     pipeline_start = time.time()
 
-    logger.info("=" * 60)
-    logger.info("UGANDA NETWORK & SERVICE INTELLIGENCE")
-    logger.info("=" * 60)
+    print("=" * 60)
+    print("UGANDA NETWORK & SERVICE INTELLIGENCE")
+    print("=" * 60)
 
-    # Initialize tracking metric holders
-    ingestion_metrics = {}
-    silver_metrics = {}
-    gold_metrics = {}
-    source_records = 0
+    # Initialize tracking metric holders to guarantee safety boundary defaults
+    ingestion_result = {"source_records": 0, "inserted_records": 0, "skipped_records": 0}
+    silver_metrics = {"measurements_loaded": 0, "health_loaded": 0}
+    gold_metrics = {"site_daily_performance": 0, "equipment_health": 0}
     quality_checks_passed = 0
-    gold_records = 0
     quality_passed = False
 
     run_id = start_pipeline_run()
+    print(f"\nPipeline run ID: {run_id}")
     logger.info(f"Pipeline run started | run_id={run_id}")
 
     try:
@@ -130,37 +113,34 @@ def main():
         # 1. INGESTION
         # -------------------------------------------------
         logger.info(f"Starting ingestion stage | run_id={run_id}")
-        ingestion_metrics = run_ingestion()
+        ingestion_result = run_ingestion()
+        
+        print("\nIngestion summary:")
+        print(f"  Source records: {ingestion_result['source_records']}")
+        print(f"  Inserted records: {ingestion_result['inserted_records']}")
+        print(f"  Skipped records: {ingestion_result['skipped_records']}")
         logger.info(f"Ingestion stage completed successfully | run_id={run_id}")
 
-        # Extract inbound data load scale metrics before mutative layers
-        source_records = get_source_record_count()
-        logger.info(f"Source records detected | measurements={source_records}")
-
         # -------------------------------------------------
-        # 2. DATA QUALITY VALIDATION LAYER
+        # 2. DATA QUALITY VALIDATION GATEWAY
         # -------------------------------------------------
         logger.info("Starting data-quality checks")
-        quality_result = run_data_quality_checks()
+        quality_response = run_data_quality_checks()
         
-        quality_passed = quality_result["passed"]
+        quality_passed = quality_response["passed"]
         quality_checks_passed = sum(
-            1 for passed in quality_result["checks"].values() if passed
+            1 for passed in quality_response["checks"].values() if passed
         )
 
         if not quality_passed:
             logger.error(f"Data-quality checks failed | run_id={run_id}")
-            
             finish_pipeline_run(
                 run_id=run_id,
                 status="FAILED",
-                records_processed=source_records,
+                records_processed=ingestion_result["inserted_records"],
                 quality_checks_passed=quality_checks_passed,
-                silver_records_processed=0,
-                gold_records_processed=0,
                 error_message="Data-quality checks failed"
             )
-            
             raise RuntimeError("Data-quality checks failed. Pipeline stopped before Silver.")
 
         logger.info(f"Data-quality checks passed | run_id={run_id}")
@@ -171,12 +151,6 @@ def main():
         logger.info(f"Starting Silver transformation | run_id={run_id}")
         silver_metrics = run_silver()
         logger.info(f"Silver transformation completed | run_id={run_id}")
-        
-        logger.info(
-            "Silver records processed | measurements=%s | network_health=%s",
-            silver_metrics["measurements_loaded"],
-            silver_metrics["health_loaded"]
-        )
 
         # -------------------------------------------------
         # 4. GOLD REPORTING AGGREGATIONS
@@ -184,18 +158,10 @@ def main():
         logger.info(f"Starting Gold transformation | run_id={run_id}")
         gold_metrics = run_gold()
         
-        # Extract and sum distinct aggregated rows from Gold summaries
         gold_records = (
             gold_metrics["site_daily_performance"]
             + gold_metrics["equipment_health"]
         )
-        
-        logger.info(
-            f"Gold records processed | "
-            f"site_daily={gold_metrics['site_daily_performance']} | "
-            f"equipment_health={gold_metrics['equipment_health']}"
-        )
-        
         logger.info(f"Gold transformation completed | run_id={run_id}")
 
         # Compute precision runtime delta metrics
@@ -207,7 +173,7 @@ def main():
         finish_pipeline_run(
             run_id=run_id,
             status="SUCCESS",
-            records_processed=source_records,
+            records_processed=ingestion_result["inserted_records"],
             quality_checks_passed=quality_checks_passed,
             silver_records_processed=silver_metrics["measurements_loaded"],
             gold_records_processed=gold_records
@@ -215,29 +181,29 @@ def main():
         
         logger.info(
             f"Pipeline completed successfully | run_id={run_id} | "
+            f"source_records={ingestion_result['source_records']} | "
             f"duration_seconds={pipeline_duration:.2f}"
         )
+        print("\nPipeline completed successfully.")
 
     except Exception as error:
         # -------------------------------------------------
         # 6. FAILURE PATH OVERRIDES
         # -------------------------------------------------
         pipeline_duration = time.time() - pipeline_start
-
-        logger.error(
-            f"Pipeline failed | run_id={run_id} | "
-            f"duration_seconds={pipeline_duration:.2f} | error={error}"
-        )
+        logger.error(f"Pipeline failed | run_id={run_id} | error={error}")
 
         finish_pipeline_run(
             run_id=run_id,
             status="FAILED",
-            records_processed=source_records,
+            records_processed=ingestion_result["inserted_records"],
             quality_checks_passed=quality_checks_passed,
             silver_records_processed=silver_metrics.get("measurements_loaded", 0),
-            gold_records_processed=gold_records,
+            gold_records_processed=0,
             error_message=str(error)
         )
+        print("\nPipeline failed.")
+        print(f"Error: {error}")
         raise
 
 
