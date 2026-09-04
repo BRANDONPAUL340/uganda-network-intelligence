@@ -6,7 +6,7 @@ from sqlalchemy import text
 
 from src.database import engine
 from src.logger import get_logger
-from src.data_quality.measurements import validate_record, get_validation_failure
+from src.validation.measurement_contract import validate_measurement  # 🔑 Connect Data Contract
 from src.data_quality.quarantine import reject_measurement
 
 # Initialize module-level logger instance
@@ -51,14 +51,13 @@ def get_processed_source_ids():
     """
     with engine.begin() as connection:
         result = connection.execute(text(sql))
-        # Loading records directly into an in-memory set object guarantees O(1) constant-time indexing
         return {row[0] for row in result}
 
 
 def insert_measurements(records):
     """
-    Validates, filters, and loads records incrementally.
-    Uses in-memory set filtering to skip already processed entries instantly.
+    Validates, filters, and loads records incrementally against a strict data contract.
+    Routes clean records downstream while flushing contract violations straight to quarantine.
     """
     sql = """
     INSERT INTO measurements (
@@ -91,27 +90,35 @@ def insert_measurements(records):
                 logger.info(f"Skipping already processed record | source_record_id={source_record_id}")
                 continue
 
-            # 🛠️ 2. Data Quality Validation Gate
-            checks = validate_record(record)
-            reason = get_validation_failure(checks)
+            # Parse a temporary record with proper datetime object to feed to the Data Contract engine
+            temp_record = dict(record)
+            try:
+                temp_record["measured_at"] = datetime.strptime(str(record.get("measured_at")).strip(), "%Y-%m-%d %H:%M:%S")
+            except (ValueError, TypeError):
+                temp_record["measured_at"] = None  # Contract will catch malformed types cleanly
 
-            if reason:
+            # 🛠️ 2. Data Contract Rule Interception Firewall Gateway
+            errors = validate_measurement(temp_record)
+
+            if errors:
+                # 🛑 CONTRACT VIOLATION BRANCH: Combine error list into a string, log to quarantine, and skip insert
+                combined_reason = "; ".join(errors)
                 reject_measurement(
                     record=record,
-                    reason=reason,
+                    reason=combined_reason,
                     source_file="network_measurements.csv"
                 )
                 rejected += 1
                 continue
 
-            # 🛠️ 3. Clean path load database transaction writes
+            # 🛠️ 3. CLEAN PATHWAY BRANCH: Typecast metrics values and flush downstream
             result = connection.execute(
                 text(sql),
                 {
                     "source_record_id": source_record_id,
                     "equipment_id": int(record["equipment_id"]),
                     "site_id": int(record["site_id"]),
-                    "measured_at": datetime.strptime(record["measured_at"].strip(), "%Y-%m-%d %H:%M:%S"),
+                    "measured_at": temp_record["measured_at"],
                     "traffic_mb": float(record["traffic_mb"]),
                     "latency_ms": float(record["latency_ms"]),
                     "packet_loss_pct": float(record["packet_loss_pct"]),
@@ -121,7 +128,7 @@ def insert_measurements(records):
             )
             inserted += result.rowcount
             
-            # 🛠️ 4. Update the processed set to handle in-batch duplicates
+            # Update the processed set to handle in-batch duplicates dynamically
             if result.rowcount == 1:
                 processed_ids.add(source_record_id)
 
@@ -151,3 +158,7 @@ def run_ingestion():
         "rejected_records": rejected,
         "skipped_records": skipped
     }
+
+
+if __name__ == "__main__":
+    run_ingestion()
