@@ -175,19 +175,20 @@ def main():
 
         logger.info(f"Data-quality checks passed | run_id={run_id}")
 
-        # -------------------------------------------------
+                # -------------------------------------------------
         # 3. SILVER TRANSFORMS
         # -------------------------------------------------
         logger.info(f"Starting Silver transformation | run_id={run_id}")
-        silver_metrics = run_silver()
+        silver_metrics = run_silver(run_id)  # 🔑 Lineage Link: Pass run_id dynamically downstream
         logger.info(f"Silver transformation completed | run_id={run_id}")
 
-        # -------------------------------------------------
+                # -------------------------------------------------
         # 4. GOLD REPORTING AGGREGATIONS
         # -------------------------------------------------
         logger.info(f"Starting Gold transformation | run_id={run_id}")
-        gold_metrics = run_gold()
+        gold_metrics = run_gold(run_id)
         
+        # 📊 Unpack and calculate the total materialized Gold records
         gold_records = (
             gold_metrics["site_daily_performance"]
             + gold_metrics["equipment_health"]
@@ -210,8 +211,9 @@ def main():
             records_skipped=records_skipped,
             quality_checks_passed=quality_checks_passed,
             silver_records_processed=silver_metrics["measurements_loaded"],
-            gold_records_processed=gold_records
+            gold_records_processed=gold_records  # 🔑 Fixed: gold_records is now explicitly defined!
         )
+
         
         logger.info(
             f"Pipeline completed successfully | run_id={run_id} | "

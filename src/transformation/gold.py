@@ -2,6 +2,10 @@ from sqlalchemy import text
 
 from src.database import engine
 from src.logger import get_logger
+from src.monitoring.transformation_runs import (
+    start_transformation,
+    finish_transformation,
+)
 
 # Initialize our module-level logger instance
 logger = get_logger(__name__)
@@ -77,6 +81,7 @@ def calculate_site_daily_performance(site_id, measurement_date):
 def upsert_site_daily_performance(row):
     """
     Executes a high-performance database upsert statement to update Gold summary tables.
+    Harmonizes parameter placeholders with row values to prevent binding errors.
     """
     if row is None:
         return
@@ -121,9 +126,10 @@ def upsert_site_daily_performance(row):
                 "avg_latency_ms": row.avg_latency_ms,
                 "avg_packet_loss_pct": row.avg_packet_loss_pct,
                 "avg_signal_strength_dbm": row.avg_signal_strength_dbm,
-                "avg_availability_pct": row.avg_availability_pct,
+                "avg_availability_pct": row.avg_availability_pct, # 🔑 Aligned key name matching placeholder!
             }
         )
+
 
 
 def create_gold_equipment_health():
@@ -207,22 +213,49 @@ def run_incremental_gold():
     return processed
 
 
-def run_gold():
+def run_gold(run_id):
     """
-    Unified entry point matching our master workflow wrapper criteria.
+    Unified entry point for the Gold layer.
+    Accepts run_id and registers a micro-tier audit record inside transformation_runs.
     """
     logger.info("--- GOLD LAYER ---")
     
-    # 📊 Extract separate row metrics from both structural processes
-    site_performance_count = run_incremental_gold()
-    equipment_health_count = create_gold_equipment_health()
+    # 🚨 Register micro-task initiation state
+    transformation_run_id = start_transformation(
+        run_id=run_id,
+        layer="GOLD",
+        transformation_name="gold_transformations"
+    )
 
-    # 🔑 Connected: Returns both distinct dictionary keys to satisfy pipeline.py indexes
-    return {
-        "site_daily_performance": site_performance_count,
-        "equipment_health": equipment_health_count
-    }
+    try:
+        site_performance_count = run_incremental_gold()
+        equipment_health_count = create_gold_equipment_health()
+        
+        total_processed = site_performance_count + equipment_health_count
+
+        # 🚨 Success Pathway Closeout
+        finish_transformation(
+            transformation_run_id=transformation_run_id,
+            status="SUCCESS",
+            records_processed=total_processed
+        )
+
+        return {
+            "site_daily_performance": site_performance_count,
+            "equipment_health": equipment_health_count
+        }
+
+    except Exception as error:
+        # 🚨 Failure Pathway Override
+        finish_transformation(
+            transformation_run_id=transformation_run_id,
+            status="FAILED",
+            records_processed=0,
+            error_message=str(error)
+        )
+        logger.error(f"Gold transformation module encountered a critical exception: {error}")
+        raise
 
 
 if __name__ == "__main__":
-    run_gold()
+    run_gold(run_id=1)
