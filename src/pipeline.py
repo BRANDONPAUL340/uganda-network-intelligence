@@ -15,16 +15,22 @@ from src.transformation.gold import run_gold
 logger = get_logger(__name__)
 
 
-def start_pipeline_run():
+def start_pipeline_run(source_file=None):
+    """
+    Initializes a new continuous integration runtime tracking session entry 
+    and binds the targeted source file metadata footprint.
+    """
     logger.info("Creating pipeline run record in the database.")
     sql = """
     INSERT INTO pipeline_runs (
         pipeline_name,
+        source_file,
         started_at,
         status
     )
     VALUES (
         :pipeline_name,
+        :source_file,
         :started_at,
         'RUNNING'
     )
@@ -35,6 +41,7 @@ def start_pipeline_run():
             text(sql),
             {
                 "pipeline_name": PIPELINE_NAME,
+                "source_file": source_file,
                 "started_at": datetime.now(),
             }
         )
@@ -47,20 +54,30 @@ def finish_pipeline_run(
     run_id,
     status,
     records_processed=0,
+    records_read=0,
+    records_inserted=0,
+    records_rejected=0,
+    records_skipped=0,
     quality_checks_passed=0,
     silver_records_processed=0,
     gold_records_processed=0,
-    error_message=None
+    error_message=None,
 ):
+    """
+    Closes out the active pipeline execution log and flushes granular multi-stage 
+    volumetric parameters directly into the audit registry.
+    """
     sql = """
     UPDATE pipeline_runs
     SET
         completed_at = :completed_at,
         duration_seconds = EXTRACT(EPOCH FROM (:completed_at - started_at)),
         status = :status,
-        records_read = :records_processed,
-        records_inserted = :records_processed,
         records_processed = :records_processed,
+        records_read = :records_read,
+        records_inserted = :records_inserted,
+        records_rejected = :records_rejected,
+        records_skipped = :records_skipped,
         quality_checks_passed = :quality_checks_passed,
         silver_records_processed = :silver_records_processed,
         gold_records_processed = :gold_records_processed,
@@ -76,6 +93,10 @@ def finish_pipeline_run(
                 "completed_at": completed_at,
                 "status": status,
                 "records_processed": records_processed,
+                "records_read": records_read,
+                "records_inserted": records_inserted,
+                "records_rejected": records_rejected,
+                "records_skipped": records_skipped,
                 "quality_checks_passed": quality_checks_passed,
                 "silver_records_processed": silver_records_processed,
                 "gold_records_processed": gold_records_processed,
@@ -92,31 +113,38 @@ def main():
     print("=" * 60)
 
     # Initialize tracking metric holders to guarantee safety boundary defaults
-    ingestion_result = {"source_records": 0, "inserted_records": 0, "rejected_records": 0}
+    records_read = 0
+    records_inserted = 0
+    records_rejected = 0
+    records_skipped = 0
+    records_processed = 0
     silver_metrics = {"measurements_loaded": 0, "health_loaded": 0}
     gold_metrics = {"site_daily_performance": 0, "equipment_health": 0}
     quality_checks_passed = 0
     quality_passed = False
 
-    run_id = start_pipeline_run()
+    # Establish baseline tracking target source filename metadata footprint
+    target_file = "network_measurements.csv"
+    run_id = start_pipeline_run(source_file=target_file)
     print(f"\nPipeline run ID: {run_id}")
     logger.info(f"Pipeline run started | run_id={run_id}")
 
     try:
         # -------------------------------------------------
-        # 1. INGESTION WITH INTEGRATED DATA QUARANTINE
-        # -------------------------------------------------
-                # -------------------------------------------------
         # 1. INGESTION WITH INTEGRATED DATA QUARANTINE & CDC
         # -------------------------------------------------
         logger.info(f"Starting ingestion stage | run_id={run_id}")
         ingestion_result = run_ingestion()
         
-        print("\nIngestion summary:")
-        print(f"  Source records:   {ingestion_result['source_records']}")
-        print(f"  Inserted records: {ingestion_result['inserted_records']}")
-        print(f"  Rejected records: {ingestion_result['rejected_records']}")
-        print(f"  Skipped records:  {ingestion_result['skipped_records']}") # ◄ 🔥 Added Metrics Column!
+        # Unpack dynamic metrics components fields from our ingestion subpackage
+        records_read = ingestion_result["source_records"]
+        records_inserted = ingestion_result["inserted_records"]
+        records_rejected = ingestion_result["rejected_records"]
+        records_skipped = ingestion_result["skipped_records"]
+        
+        # 📊 Lineage Balancing Verification Check
+        records_processed = records_inserted + records_rejected + records_skipped
+        assert records_processed == records_read, "Data lineage leak: Records handled sum mismatch total read values!"
         logger.info(f"Ingestion stage completed successfully | run_id={run_id}")
 
         # -------------------------------------------------
@@ -135,7 +163,11 @@ def main():
             finish_pipeline_run(
                 run_id=run_id,
                 status="FAILED",
-                records_processed=ingestion_result["inserted_records"],
+                records_processed=records_processed,
+                records_read=records_read,
+                records_inserted=records_inserted,
+                records_rejected=records_rejected,
+                records_skipped=records_skipped,
                 quality_checks_passed=quality_checks_passed,
                 error_message="Data-quality checks failed"
             )
@@ -171,7 +203,11 @@ def main():
         finish_pipeline_run(
             run_id=run_id,
             status="SUCCESS",
-            records_processed=ingestion_result["inserted_records"],
+            records_processed=records_processed,
+            records_read=records_read,
+            records_inserted=records_inserted,
+            records_rejected=records_rejected,
+            records_skipped=records_skipped,
             quality_checks_passed=quality_checks_passed,
             silver_records_processed=silver_metrics["measurements_loaded"],
             gold_records_processed=gold_records
@@ -179,19 +215,33 @@ def main():
         
         logger.info(
             f"Pipeline completed successfully | run_id={run_id} | "
-            f"source_records={ingestion_result['source_records']} | "
-            f"duration_seconds={pipeline_duration:.2f}"
+            f"source_records={records_read} | duration_seconds={pipeline_duration:.2f}"
         )
+        
+        print("\nPipeline summary")
+        print("-" * 40)
+        print(f"Records read:       {records_read}")
+        print(f"Records inserted:   {records_inserted}")
+        print(f"Records rejected:   {records_rejected}")
+        print(f"Records skipped:    {records_skipped}")
+        print(f"Records processed:  {records_processed}")
         print("\nPipeline completed successfully.")
 
     except Exception as error:
+        # -------------------------------------------------
+        # 6. FAILURE PATH OVERRIDES
+        # -------------------------------------------------
         pipeline_duration = time.time() - pipeline_start
         logger.error(f"Pipeline failed | run_id={run_id} | error={error}")
 
         finish_pipeline_run(
             run_id=run_id,
             status="FAILED",
-            records_processed=ingestion_result["inserted_records"],
+            records_processed=records_processed,
+            records_read=records_read,
+            records_inserted=records_inserted,
+            records_rejected=records_rejected,
+            records_skipped=records_skipped,
             quality_checks_passed=quality_checks_passed,
             silver_records_processed=silver_metrics.get("measurements_loaded", 0),
             gold_records_processed=0,
