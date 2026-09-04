@@ -10,21 +10,25 @@ def reject_measurement(record, reason, source_file=None):
     """
     Safely captures and writes an individual anomalous record row into 
     the persistent rejected_measurements ledger table on disk.
+    
+    Distinguishes new rejections from historically quarantined records via result.rowcount.
     """
     sql = """
     INSERT INTO rejected_measurements (
         source_record_id, equipment_id, site_id, measured_at, traffic_mb,
         latency_ms, packet_loss_pct, signal_strength_dbm, availability_pct,
-        rejection_reason, source_file
+        rejection_reason, source_file, ingested_at
     )
     VALUES (
         :source_record_id, :equipment_id, :site_id, :measured_at, :traffic_mb,
         :latency_ms, :packet_loss_pct, :signal_strength_dbm, :availability_pct,
-        :rejection_reason, :source_file
-    );
+        :rejection_reason, :source_file, CURRENT_TIMESTAMP
+    )
+    ON CONFLICT (source_record_id)
+    DO NOTHING;
     """
     with engine.begin() as connection:
-        connection.execute(
+        result = connection.execute(
             text(sql),
             {
                 "source_record_id": record.get("source_record_id"),
@@ -40,9 +44,19 @@ def reject_measurement(record, reason, source_file=None):
                 "source_file": source_file,
             },
         )
-    logger.warning(
-        f"Measurement quarantined | source_record_id={record.get('source_record_id')} | reason={reason}"
-    )
+
+        # 📊 Structured Telemetry: Count if a row was actively written vs dropped as duplicate
+        if result.rowcount == 1:
+            logger.warning(
+                "Measurement quarantined | "
+                f"source_record_id={record.get('source_record_id')} | "
+                f"reason={reason}"
+            )
+        else:
+            logger.info(
+                "Rejected record already quarantined | "
+                f"source_record_id={record.get('source_record_id')}"
+            )
 
 
 def quarantine_records(rejected_records, source_file=None):

@@ -106,13 +106,17 @@ def main():
         # -------------------------------------------------
         # 1. INGESTION WITH INTEGRATED DATA QUARANTINE
         # -------------------------------------------------
+                # -------------------------------------------------
+        # 1. INGESTION WITH INTEGRATED DATA QUARANTINE & CDC
+        # -------------------------------------------------
         logger.info(f"Starting ingestion stage | run_id={run_id}")
         ingestion_result = run_ingestion()
         
         print("\nIngestion summary:")
-        print(f"  Source records: {ingestion_result['source_records']}")
+        print(f"  Source records:   {ingestion_result['source_records']}")
         print(f"  Inserted records: {ingestion_result['inserted_records']}")
         print(f"  Rejected records: {ingestion_result['rejected_records']}")
+        print(f"  Skipped records:  {ingestion_result['skipped_records']}") # ◄ 🔥 Added Metrics Column!
         logger.info(f"Ingestion stage completed successfully | run_id={run_id}")
 
         # -------------------------------------------------
