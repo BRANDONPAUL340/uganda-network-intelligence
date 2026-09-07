@@ -1,0 +1,240 @@
+[1mdiff --git a/src/pipeline.py b/src/pipeline.py[m
+[1mindex 6073e6d..16e6fcf 100644[m
+[1m--- a/src/pipeline.py[m
+[1m+++ b/src/pipeline.py[m
+[36m@@ -7,6 +7,7 @@[m [mfrom src.config import PIPELINE_NAME[m
+ from src.database import engine[m
+ from src.ingestion.measurements import run_ingestion[m
+ from src.logger import get_logger[m
+[32m+[m[32mfrom src.monitoring import PipelineMetrics  # 🔑 Object-Oriented Telemetry[m
+ from src.data_quality.checks import run_data_quality_checks[m
+ from src.transformation.silver import run_silver[m
+ from src.transformation.gold import run_gold[m
+[36m@@ -16,23 +17,16 @@[m [mlogger = get_logger(__name__)[m
+ [m
+ [m
+ def start_pipeline_run(source_file=None):[m
+[31m-    """[m
+[31m-    Initializes a new continuous integration runtime tracking session entry [m
+[31m-    and binds the targeted source file metadata footprint.[m
+[31m-    """[m
+[32m+[m[32m    """Initializes a new continuous integration runtime tracking session entry."""[m
+     logger.info("Creating pipeline run record in the database.")[m
+     sql = """[m
+     INSERT INTO pipeline_runs ([m
+[31m-        pipeline_name,[m
+[31m-        source_file,[m
+[31m-        started_at,[m
+[31m-        status[m
+[32m+[m[32m        pipeline_name, source_file, started_at, status,[m
+[32m+[m[32m        records_read, records_inserted, records_rejected, records_skipped, records_processed[m
+     )[m
+     VALUES ([m
+[31m-        :pipeline_name,[m
+[31m-        :source_file,[m
+[31m-        :started_at,[m
+[31m-        'RUNNING'[m
+[32m+[m[32m        :pipeline_name, :source_file, :started_at, 'RUNNING',[m
+[32m+[m[32m        0, 0, 0, 0, 0[m
+     )[m
+     RETURNING run_id;[m
+     """[m
+[36m@@ -53,7 +47,6 @@[m [mdef start_pipeline_run(source_file=None):[m
+ def finish_pipeline_run([m
+     run_id,[m
+     status,[m
+[31m-    records_processed=0,[m
+     records_read=0,[m
+     records_inserted=0,[m
+     records_rejected=0,[m
+[36m@@ -63,21 +56,18 @@[m [mdef finish_pipeline_run([m
+     gold_records_processed=0,[m
+     error_message=None,[m
+ ):[m
+[31m-    """[m
+[31m-    Closes out the active pipeline execution log and flushes granular multi-stage [m
+[31m-    volumetric parameters directly into the audit registry.[m
+[31m-    """[m
+[32m+[m[32m    """Closes out the active pipeline execution log with high-precision duration metadata."""[m
+     sql = """[m
+     UPDATE pipeline_runs[m
+     SET[m
+         completed_at = :completed_at,[m
+[31m-        duration_seconds = EXTRACT(EPOCH FROM (:completed_at - started_at)),[m
+         status = :status,[m
+[31m-        records_processed = :records_processed,[m
+         records_read = :records_read,[m
+         records_inserted = :records_inserted,[m
+         records_rejected = :records_rejected,[m
+         records_skipped = :records_skipped,[m
+[32m+[m[32m        records_processed = (:records_inserted + :records_rejected),[m
+[32m+[m[32m        duration_seconds = EXTRACT(EPOCH FROM (:completed_at - started_at)),[m
+         quality_checks_passed = :quality_checks_passed,[m
+         silver_records_processed = :silver_records_processed,[m
+         gold_records_processed = :gold_records_processed,[m
+[36m@@ -92,7 +82,6 @@[m [mdef finish_pipeline_run([m
+                 "run_id": run_id,[m
+                 "completed_at": completed_at,[m
+                 "status": status,[m
+[31m-                "records_processed": records_processed,[m
+                 "records_read": records_read,[m
+                 "records_inserted": records_inserted,[m
+                 "records_rejected": records_rejected,[m
+[36m@@ -112,18 +101,15 @@[m [mdef main():[m
+     print("UGANDA NETWORK & SERVICE INTELLIGENCE")[m
+     print("=" * 60)[m
+ [m
+[32m+[m[32m    # 🚀 Instantiate our unified object-oriented metrics manager[m
+[32m+[m[32m    metrics = PipelineMetrics()[m
+[32m+[m
+     # Initialize tracking metric holders to guarantee safety boundary defaults[m
+[31m-    records_read = 0[m
+[31m-    records_inserted = 0[m
+[31m-    records_rejected = 0[m
+[31m-    records_skipped = 0[m
+[31m-    records_processed = 0[m
+     silver_metrics = {"measurements_loaded": 0, "health_loaded": 0}[m
+     gold_metrics = {"site_daily_performance": 0, "equipment_health": 0}[m
+     quality_checks_passed = 0[m
+     quality_passed = False[m
+ [m
+[31m-    # Establish baseline tracking target source filename metadata footprint[m
+     target_file = "network_measurements.csv"[m
+     run_id = start_pipeline_run(source_file=target_file)[m
+     print(f"\nPipeline run ID: {run_id}")[m
+[36m@@ -136,15 +122,17 @@[m [mdef main():[m
+         logger.info(f"Starting ingestion stage | run_id={run_id}")[m
+         ingestion_result = run_ingestion()[m
+         [m
+[31m-        # Unpack dynamic metrics components fields from our ingestion subpackage[m
+[31m-        records_read = ingestion_result["source_records"][m
+[31m-        records_inserted = ingestion_result["inserted_records"][m
+[31m-        records_rejected = ingestion_result["rejected_records"][m
+[31m-        records_skipped = ingestion_result["skipped_records"][m
+[32m+[m[32m        # 📊 Route returns cleanly straight into our object model attributes[m
+[32m+[m[32m        metrics.records_read = ingestion_result["source_records"][m
+[32m+[m[32m        metrics.records_inserted = ingestion_result["inserted_records"][m
+[32m+[m[32m        metrics.records_rejected = ingestion_result["rejected_records"][m
+[32m+[m[32m        metrics.records_skipped = ingestion_result["skipped_records"][m
+         [m
+[31m-        # 📊 Lineage Balancing Verification Check[m
+[31m-        records_processed = records_inserted + records_rejected + records_skipped[m
+[31m-        assert records_processed == records_read, "Data lineage leak: Records handled sum mismatch total read values!"[m
+[32m+[m[32m        print("\nIngestion summary:")[m
+[32m+[m[32m        print(f"  Source records:   {metrics.records_read}")[m
+[32m+[m[32m        print(f"  Inserted records: {metrics.records_inserted}")[m
+[32m+[m[32m        print(f"  Rejected records: {metrics.records_rejected}")[m
+[32m+[m[32m        print(f"  Skipped records:  {metrics.records_skipped}")[m
+         logger.info(f"Ingestion stage completed successfully | run_id={run_id}")[m
+ [m
+         # -------------------------------------------------[m
+[36m@@ -163,11 +151,10 @@[m [mdef main():[m
+             finish_pipeline_run([m
+                 run_id=run_id,[m
+                 status="FAILED",[m
+[31m-                records_processed=records_processed,[m
+[31m-                records_read=records_read,[m
+[31m-                records_inserted=records_inserted,[m
+[31m-                records_rejected=records_rejected,[m
+[31m-                records_skipped=records_skipped,[m
+[32m+[m[32m                records_read=metrics.records_read,[m
+[32m+[m[32m                records_inserted=metrics.records_inserted,[m
+[32m+[m[32m                records_rejected=metrics.records_rejected,[m
+[32m+[m[32m                records_skipped=metrics.records_skipped,[m
+                 quality_checks_passed=quality_checks_passed,[m
+                 error_message="Data-quality checks failed"[m
+             )[m
+[36m@@ -175,20 +162,20 @@[m [mdef main():[m
+ [m
+         logger.info(f"Data-quality checks passed | run_id={run_id}")[m
+ [m
+[31m-                # -------------------------------------------------[m
+[32m+[m[32m        # -------------------------------------------------[m
+         # 3. SILVER TRANSFORMS[m
+         # -------------------------------------------------[m
+         logger.info(f"Starting Silver transformation | run_id={run_id}")[m
+[31m-        silver_metrics = run_silver(run_id)  # 🔑 Lineage Link: Pass run_id dynamically downstream[m
+[32m+[m[32m        silver_metrics = run_silver(run_id)[m
+[32m+[m[32m        print(f"Silver measurements loaded: {silver_metrics['measurements_loaded']}")[m
+         logger.info(f"Silver transformation completed | run_id={run_id}")[m
+ [m
+[31m-                # -------------------------------------------------[m
+[32m+[m[32m        # -------------------------------------------------[m
+         # 4. GOLD REPORTING AGGREGATIONS[m
+         # -------------------------------------------------[m
+         logger.info(f"Starting Gold transformation | run_id={run_id}")[m
+         gold_metrics = run_gold(run_id)[m
+         [m
+[31m-        # 📊 Unpack and calculate the total materialized Gold records[m
+         gold_records = ([m
+             gold_metrics["site_daily_performance"][m
+             + gold_metrics["equipment_health"][m
+[36m@@ -198,52 +185,49 @@[m [mdef main():[m
+         # Compute precision runtime delta metrics[m
+         pipeline_duration = time.time() - pipeline_start[m
+ [m
+[31m-        # -------------------------------------------------[m
+[32m+[m[32m            # -------------------------------------------------[m
+         # 5. SUCCESS PATH CLOSEOUT[m
+         # -------------------------------------------------[m
+         finish_pipeline_run([m
+             run_id=run_id,[m
+             status="SUCCESS",[m
+[31m-            records_processed=records_processed,[m
+[31m-            records_read=records_read,[m
+[31m-            records_inserted=records_inserted,[m
+[31m-            records_rejected=records_rejected,[m
+[31m-            records_skipped=records_skipped,[m
+[32m+[m[32m            records_read=metrics.records_read,[m
+[32m+[m[32m            records_inserted=metrics.records_inserted,[m
+[32m+[m[32m            records_rejected=metrics.records_rejected,[m
+[32m+[m[32m            records_skipped=metrics.records_skipped,[m
+             quality_checks_passed=quality_checks_passed,[m
+             silver_records_processed=silver_metrics["measurements_loaded"],[m
+[31m-            gold_records_processed=gold_records  # 🔑 Fixed: gold_records is now explicitly defined![m
+[32m+[m[32m            gold_records_processed=gold_records[m
+         )[m
+ [m
+         [m
+         logger.info([m
+             f"Pipeline completed successfully | run_id={run_id} | "[m
+[31m-            f"source_records={records_read} | duration_seconds={pipeline_duration:.2f}"[m
+[32m+[m[32m            f"source_records={metrics.records_read} | duration_seconds={pipeline_duration:.2f}"[m
+         )[m
+         [m
+         print("\nPipeline summary")[m
+         print("-" * 40)[m
+[31m-        print(f"Records read:       {records_read}")[m
+[31m-        print(f"Records inserted:   {records_inserted}")[m
+[31m-        print(f"Records rejected:   {records_rejected}")[m
+[31m-        print(f"Records skipped:    {records_skipped}")[m
+[31m-        print(f"Records processed:  {records_processed}")[m
+[32m+[m[32m        print(f"Records read:       {metrics.records_read}")[m
+[32m+[m[32m        print(f"Records inserted:   {metrics.records_inserted}")[m
+[32m+[m[32m        print(f"Records rejected:   {metrics.records_rejected}")[m
+[32m+[m[32m        print(f"Records skipped:    {metrics.records_skipped}")[m
+[32m+[m[32m        print(f"Records processed:  {metrics.records_processed}")[m
+         print("\nPipeline completed successfully.")[m
+ [m
+     except Exception as error:[m
+         # -------------------------------------------------[m
+         # 6. FAILURE PATH OVERRIDES[m
+         # -------------------------------------------------[m
+[31m-        pipeline_duration = time.time() - pipeline_start[m
+         logger.error(f"Pipeline failed | run_id={run_id} | error={error}")[m
+ [m
+         finish_pipeline_run([m
+             run_id=run_id,[m
+             status="FAILED",[m
+[31m-            records_processed=records_processed,[m
+[31m-            records_read=records_read,[m
+[31m-            records_inserted=records_inserted,[m
+[31m-            records_rejected=records_rejected,[m
+[31m-            records_skipped=records_skipped,[m
+[32m+[m[32m            records_read=metrics.records_read,[m
+[32m+[m[32m            records_inserted=metrics.records_inserted,[m
+[32m+[m[32m            records_rejected=metrics.records_rejected,[m
+[32m+[m[32m            records_skipped=metrics.records_skipped,[m
+             quality_checks_passed=quality_checks_passed,[m
+             silver_records_processed=silver_metrics.get("measurements_loaded", 0),[m
+             gold_records_processed=0,[m

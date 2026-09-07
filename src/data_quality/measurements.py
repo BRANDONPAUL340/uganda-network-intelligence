@@ -268,3 +268,203 @@ if __name__ == "__main__":
         print(f"Quality rate:   {quality_summary['quality_rate']:.2f}%")
     except Exception as err:
         print(f"\nExecution crash: {err}")
+# -------------------------------------------------------------------------
+# 📊 DATABASE-BACKED ENTERPRISE DATA QUALITY AUDITING FUNCTIONS
+# -------------------------------------------------------------------------
+
+def record_quality_result(
+    run_id,
+    table_name,
+    check_name,
+    check_type,
+    status,
+    records_checked=0,
+    records_failed=0,
+    details=None,
+):
+    """
+    Inserts a single row audit result into the data_quality_results table.
+    Natively computes the failure percentage boundary rate.
+    """
+    failure_rate = 0.0
+
+    if records_checked and records_checked > 0:
+        failure_rate = (records_failed / records_checked) * 100.0
+
+    sql = """
+    INSERT INTO data_quality_results (
+        run_id,
+        table_name,
+        check_name,
+        check_type,
+        status,
+        records_checked,
+        records_failed,
+        failure_rate_pct,
+        details
+    )
+    VALUES (
+        :run_id,
+        :table_name,
+        :check_name,
+        :check_type,
+        :status,
+        :records_checked,
+        :records_failed,
+        :failure_rate_pct,
+        :details
+    );
+    """
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(sql),
+            {
+                "run_id": run_id,
+                "table_name": table_name,
+                "check_name": check_name,
+                "check_type": check_type,
+                "status": status,
+                "records_checked": records_checked,
+                "records_failed": records_failed,
+                "failure_rate_pct": failure_rate,
+                "details": details,
+            },
+        )
+    logger.info(f"Data quality result logged | {check_name:<30} | Status: {status}")
+
+
+def check_measurement_ranges(run_id):
+    """
+    Enforces domain-aware mathematical boundaries reflecting network constraints.
+    Checks for negative values or impossible percentage rates.
+    """
+    checks = [
+        ("traffic_non_negative", "traffic_mb < 0"),
+        ("latency_non_negative", "latency_ms < 0"),
+        ("packet_loss_valid_range", "packet_loss_pct < 0 OR packet_loss_pct > 100"),
+        ("availability_valid_range", "availability_pct < 0 OR availability_pct > 100"),
+    ]
+
+    for check_name, condition in checks:
+        count_sql = f"SELECT COUNT(*) FROM measurements WHERE {condition};"
+        total_sql = "SELECT COUNT(*) FROM measurements;"
+
+        with engine.begin() as connection:
+            failed = connection.execute(text(count_sql)).scalar()
+            total = connection.execute(text(total_sql)).scalar()
+
+        status = "PASS" if failed == 0 else "FAIL"
+
+        record_quality_result(
+            run_id=run_id,
+            table_name="measurements",
+            check_name=check_name,
+            check_type="VALIDITY",
+            status=status,
+            records_checked=total,
+            records_failed=failed,
+            details=(
+                "Measurement values are within expected ranges."
+                if status == "PASS"
+                else "Measurement values outside expected ranges detected."
+            ),
+        )
+
+
+def check_measurement_completeness(run_id):
+    """
+    Evaluates required fields inside the measurements table to catch missing data.
+    """
+    checks = [
+        ("measured_at_not_null", "measured_at IS NULL"),
+        ("site_id_not_null", "site_id IS NULL"),
+        ("equipment_id_not_null", "equipment_id IS NULL"),
+    ]
+
+    for check_name, condition in checks:
+        count_sql = f"SELECT COUNT(*) FROM measurements WHERE {condition};"
+        total_sql = "SELECT COUNT(*) FROM measurements;"
+
+        with engine.begin() as connection:
+            failed = connection.execute(text(count_sql)).scalar()
+            total = connection.execute(text(total_sql)).scalar()
+
+        status = "PASS" if failed == 0 else "FAIL"
+
+        record_quality_result(
+            run_id=run_id,
+            table_name="measurements",
+            check_name=check_name,
+            check_type="COMPLETENESS",
+            status=status,
+            records_checked=total,
+            records_failed=failed,
+            details=(
+                "Required fields contain no null elements."
+                if status == "PASS"
+                else "Null field contract violations caught."
+            ),
+        )
+
+
+def check_measurement_relationships(run_id):
+    """
+    Validates cross-table relationships to ensure all measurements reference valid master rows.
+    Identifies orphaning issues in your data model.
+    """
+    checks = [
+        (
+            "measurement_site_exists",
+            """
+            SELECT COUNT(*)
+            FROM measurements m
+            LEFT JOIN sites s ON m.site_id = s.site_id
+            WHERE s.site_id IS NULL;
+            """,
+        ),
+        (
+            "measurement_equipment_exists",
+            """
+            SELECT COUNT(*)
+            FROM measurements m
+            LEFT JOIN equipment e ON m.equipment_id = e.equipment_id
+            WHERE e.equipment_id IS NULL;
+            """,
+        ),
+    ]
+
+    total_sql = "SELECT COUNT(*) FROM measurements;"
+
+    with engine.begin() as connection:
+        total = connection.execute(text(total_sql)).scalar()
+
+        for check_name, sql in checks:
+            failed = connection.execute(text(sql)).scalar()
+            status = "PASS" if failed == 0 else "FAIL"
+
+            record_quality_result(
+                run_id=run_id,
+                table_name="measurements",
+                check_name=check_name,
+                check_type="REFERENTIAL_INTEGRITY",
+                status=status,
+                records_checked=total,
+                records_failed=failed,
+                details=(
+                    "Referential integrity targets map perfectly to upstream parents."
+                    if status == "PASS"
+                    else "Orphaned rows detected violating relational integrity rules."
+                ),
+            )
+
+
+def run_data_quality_checks(run_id):
+    """
+    Unified orchestrator entry point executing all historical framework data-quality analysis.
+    """
+    print("\n--- DATA QUALITY ---")
+    check_measurement_ranges(run_id)
+    check_measurement_completeness(run_id)
+    check_measurement_relationships(run_id)
+    print("Data quality checks completed.")
