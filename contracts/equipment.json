@@ -1,0 +1,42 @@
+{
+  "dataset": "equipment",
+  "description": "Network equipment installed at monitored sites.",
+  "version": "1.0",
+  "required_columns": [
+    "equipment_id",
+    "site_id",
+    "equipment_type",
+    "status"
+  ],
+  "columns": {
+    "equipment_id": {
+      "type": "integer",
+      "nullable": false,
+      "unique": true
+    },
+    "site_id": {
+      "type": "integer",
+      "nullable": false
+    },
+    "equipment_type": {
+      "type": "string",
+      "nullable": false
+    },
+    "manufacturer": {
+      "type": "string",
+      "nullable": true
+    },
+    "model": {
+      "type": "string",
+      "nullable": true
+    },
+    "installation_date": {
+      "type": "date",
+      "nullable": true
+    },
+    "status": {
+      "type": "string",
+      "nullable": false
+    }
+  }
+}

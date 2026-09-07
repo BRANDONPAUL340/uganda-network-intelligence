@@ -1,0 +1,52 @@
+{
+  "dataset": "sites",
+  "description": "Network sites monitored by the Uganda Network & Service Intelligence Platform.",
+  "version": "1.0",
+  "required_columns": [
+    "site_id",
+    "site_name",
+    "region",
+    "district",
+    "site_type",
+    "status"
+  ],
+  "columns": {
+    "site_id": {
+      "type": "integer",
+      "nullable": false,
+      "unique": true
+    },
+    "site_name": {
+      "type": "string",
+      "nullable": false
+    },
+    "region": {
+      "type": "string",
+      "nullable": false
+    },
+    "district": {
+      "type": "string",
+      "nullable": false
+    },
+    "latitude": {
+      "type": "decimal",
+      "nullable": true,
+      "minimum": -90,
+      "maximum": 90
+    },
+    "longitude": {
+      "type": "decimal",
+      "nullable": true,
+      "minimum": -180,
+      "maximum": 180
+    },
+    "site_type": {
+      "type": "string",
+      "nullable": false
+    },
+    "status": {
+      "type": "string",
+      "nullable": false
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "dataset": "incidents",
+  "description": "Network incidents recorded against sites and equipment.",
+  "version": "1.0",
+  "required_columns": [
+    "incident_id",
+    "site_id",
+    "incident_type",
+    "severity",
+    "start_time",
+    "status"
+  ],
+  "columns": {
+    "incident_id": {
+      "type": "integer",
+      "nullable": false,
+      "unique": true
+    },
+    "site_id": {
+      "type": "integer",
+      "nullable": false
+    },
+    "equipment_id": {
+      "type": "integer",
+      "nullable": true
+    },
+    "incident_type": {
+      "type": "string",
+      "nullable": false
+    },
+    "severity": {
+      "type": "string",
+      "nullable": false
+    },
+    "start_time": {
+      "type": "timestamp",
+      "nullable": false
+    },
+    "end_time": {
+      "type": "timestamp",
+      "nullable": true
+    },
+    "status": {
+      "type": "string",
+      "nullable": false
+    },
+    "description": {
+      "type": "string",
+      "nullable": true
+    }
+  }
+}

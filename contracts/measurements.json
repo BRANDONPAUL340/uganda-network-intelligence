@@ -1,0 +1,58 @@
+{
+  "dataset": "measurements",
+  "description": "Network performance measurements collected from equipment at network sites.",
+  "version": "1.0",
+  "required_columns": [
+    "measurement_id",
+    "equipment_id",
+    "site_id",
+    "measured_at"
+  ],
+  "columns": {
+    "measurement_id": {
+      "type": "integer",
+      "nullable": false,
+      "unique": true
+    },
+    "equipment_id": {
+      "type": "integer",
+      "nullable": false
+    },
+    "site_id": {
+      "type": "integer",
+      "nullable": false
+    },
+    "measured_at": {
+      "type": "timestamp",
+      "nullable": false
+    },
+    "traffic_mb": {
+      "type": "decimal",
+      "nullable": true,
+      "minimum": 0
+    },
+    "latency_ms": {
+      "type": "decimal",
+      "nullable": true,
+      "minimum": 0
+    },
+    "packet_loss_pct": {
+      "type": "decimal",
+      "nullable": true,
+      "minimum": 0,
+      "maximum": 100
+    },
+    "signal_strength_dbm": {
+      "type": "decimal",
+      "nullable": true,
+      "minimum": -150,
+      "maximum": 0
+    },
+    "availability_pct": {
+      "type": "decimal",
+      "nullable": true,
+      "minimum": 0,
+      "maximum": 100
+    }
+  }
+}
