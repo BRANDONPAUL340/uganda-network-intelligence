@@ -14,8 +14,8 @@ from src.monitoring import (
     finish_stage_run,
     record_lineage
 )
-# 🛠️ Upgraded: Connect our enterprise-level database auditing module
-from src.data_quality import run_data_quality_checks 
+# 🛠️ Connected: Framework checks AND strict circuit breaking gate
+from src.data_quality import run_data_quality_checks, run_quality_gate 
 from src.transformation.silver import run_silver
 from src.transformation.gold import run_gold
 
@@ -165,6 +165,20 @@ def main():
         silver_metrics = run_silver(run_id)
         print(f"Silver measurements loaded: {silver_metrics['measurements_loaded']}")
         logger.info(f"Silver transformation completed | run_id={run_id}")
+
+
+                # -------------------------------------------------
+        # 3.5 DATA QUALITY GATE CIRCUIT BREAKER
+        # -------------------------------------------------
+        logger.info(f"Evaluating automated data quality gate | run_id={run_id}")
+        run_quality_gate(run_id)  # 🔑 Lineage Link: Explicitly pass run_id downstream
+        logger.info(f"Data quality gate successfully passed | run_id={run_id}")
+
+        # -------------------------------------------------
+        # 4. GOLD REPORTING AGGREGATIONS STAGE WITH TRACKING
+        # -------------------------------------------------
+        gold_stage_run_id = start_stage_run(run_id, "GOLD")
+
 
         # -------------------------------------------------
         # 4. GOLD REPORTING AGGREGATIONS STAGE WITH TRACKING
