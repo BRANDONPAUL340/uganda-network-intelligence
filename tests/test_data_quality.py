@@ -1,13 +1,9 @@
-from src.data_quality import (
-    run_data_quality_checks,
-)
-from src.data_quality.measurements import record_quality_result
+from src.data_quality import run_quality_gate
 
 
-def test_quality_functions_exist():
+def test_quality_gate_function_is_callable():
     """
-    ARRANGE, ACT & ASSERT: Verifies that our data quality monitoring package
-    compiles smoothly and exposes active, callable handler methods.
+    ARRANGE, ACT & ASSERT: Verifies that our core data quality monitoring package
+    compiles smoothly and exposes an active, callable run_quality_gate method.
     """
-    assert callable(record_quality_result)
-    assert callable(run_data_quality_checks)
+    assert callable(run_quality_gate)
