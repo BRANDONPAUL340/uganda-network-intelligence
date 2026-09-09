@@ -1,6 +1,7 @@
 -- ============================================
--- Migration 003
--- Pipeline run summary
+-- Migration 004
+-- Uganda Network Intelligence
+-- Pipeline Run Summary Performance View
 -- ============================================
 
 CREATE OR REPLACE VIEW pipeline_run_summary AS
@@ -12,48 +13,29 @@ SELECT
     p.current_stage,
     p.status,
     p.records_processed,
-    p.duration_seconds,
-
-    COUNT(q.quality_result_id) AS quality_checks,
-
-    COUNT(q.quality_result_id) FILTER (
-        WHERE q.status = 'PASS'
-    ) AS quality_passed,
-
-    COUNT(q.quality_result_id) FILTER (
-        WHERE q.status = 'FAIL'
-    ) AS quality_failed,
-
-    COALESCE(
-        SUM(q.records_failed),
-        0
-    ) AS failed_records,
-
+    EXTRACT(EPOCH FROM (p.completed_at - p.started_at))::NUMERIC(10,3) AS duration_seconds,
+    COALESCE(q.quality_checks, 0) AS quality_checks,
+    COALESCE(q.quality_passed, 0) AS quality_passed,
+    COALESCE(q.quality_failed, 0) AS quality_failed,
+    COALESCE(q.critical_failed, 0) AS critical_failed,
+    COALESCE(q.warning_failed, 0) AS warning_failed,
+    COALESCE(q.failed_records, 0) AS failed_records,
     CASE
-        WHEN p.status = 'SUCCESS'
-         AND COUNT(q.quality_result_id) FILTER (WHERE q.status = 'FAIL') = 0
-        THEN 'HEALTHY'
-        WHEN p.status = 'FAILED'
-        THEN 'FAILED'
-        ELSE 'WARNING'
-    END AS pipeline_health,
-
-    MAX(q.table_name) FILTER (
-        WHERE q.status = 'FAIL'
-    ) AS failed_table,
-
-    MAX(q.check_name) FILTER (
-        WHERE q.status = 'FAIL'
-    ) AS failed_check
-
+        WHEN COALESCE(q.critical_failed, 0) > 0 THEN 'CRITICAL'
+        WHEN COALESCE(q.warning_failed, 0) > 0 THEN 'WARNING'
+        WHEN p.status = 'FAILED' THEN 'FAILED'
+        ELSE 'HEALTHY'
+    END AS pipeline_health
 FROM pipeline_runs p
-LEFT JOIN data_quality_results q ON p.run_id = q.run_id
-GROUP BY
-    p.run_id,
-    p.pipeline_name,
-    p.started_at,
-    p.completed_at,
-    p.current_stage,
-    p.status,
-    p.records_processed,
-    p.duration_seconds;
+LEFT JOIN (
+    SELECT
+        run_id,
+        COUNT(*) AS quality_checks,
+        COUNT(*) FILTER (WHERE status = 'PASS') AS quality_passed,
+        COUNT(*) FILTER (WHERE status = 'FAIL') AS quality_failed,
+        COUNT(*) FILTER (WHERE severity = 'CRITICAL' AND status = 'FAIL') AS critical_failed,
+        COUNT(*) FILTER (WHERE severity = 'WARNING' AND status = 'FAIL') AS warning_failed,
+        COALESCE(SUM(records_failed), 0) AS failed_records
+    FROM data_quality_results
+    GROUP BY run_id
+) q ON p.run_id = q.run_id;

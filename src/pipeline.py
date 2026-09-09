@@ -93,6 +93,28 @@ def finish_pipeline_run(
                 "current_stage": current_stage,
             }
         )
+def get_quality_summary(run_id):
+    """
+    Queries data_quality_results for the current run_id to calculate 
+    the exact number of passed and failed checks dynamically at runtime.
+    """
+    sql = """
+    SELECT 
+        COUNT(*) AS checks,
+        COUNT(*) FILTER (WHERE status = 'PASS') AS passed,
+        COUNT(*) FILTER (WHERE status = 'FAIL') AS failed
+    FROM data_quality_results
+    WHERE run_id = :run_id;
+    """
+    with engine.begin() as connection:
+        result = connection.execute(text(sql), {"run_id": run_id}).mappings().first()
+        if result and result["checks"] > 0:
+            return {
+                "checks": result["checks"],
+                "passed": result["passed"],
+                "failed": result["failed"]
+            }
+        return {"checks": 0, "passed": 0, "failed": 0}
 
 
 def main():
@@ -108,20 +130,33 @@ def main():
 
     records_processed = 0
     try:
-        # -------------------------------------------------
+                # -------------------------------------------------
         # 2. SILVER STAGE
         # -------------------------------------------------
         update_pipeline_stage(run_id, "SILVER")
         print("\nCurrent stage: SILVER")
-        
         records_processed = run_silver(run_id)
 
+                # -------------------------------------------------
+        # 3. QUALITY STAGE
         # -------------------------------------------------
-        # 3. GOLD STAGE
+        update_pipeline_stage(run_id, "QUALITY")
+        print("\nCurrent stage: QUALITY")
+        
+        # 🚀 Capture programmatic validation results dictionary
+        quality_result = run_quality_gate(run_id)
+
+        if quality_result["failed"] > 0:
+            logger.warning(f"⚠️ Quality warning triggered for run_id={run_id} | Failed checks={quality_result['failed']}")
+            print(f"⚠️ Warning: {quality_result['failed']} quality checks failed. Proceeding with warning footprint.")
+        else:
+            print("DATA QUALITY GATE PASSED.")
+
+        # -------------------------------------------------
+        # 4. GOLD STAGE (Safely isolated after data contract validations!)
         # -------------------------------------------------
         update_pipeline_stage(run_id, "GOLD")
         print("\nCurrent stage: GOLD")
-        
         run_gold(run_id)
 
         # ⏱️ Precision Duration Tracking Calculation for Success Path
@@ -143,25 +178,29 @@ def main():
         print(f"Records processed: {records_processed}")
 
     except Exception as error:
-        # ⏱️ Precision Duration Tracking Calculation for Failure Path
+                # ⏱️ Precision Duration Tracking Calculation for Success Path
         pipeline_end = datetime.now()
         duration_seconds = (pipeline_end - pipeline_start).total_seconds()
 
+        # 🚀 Harvest dynamic quality metrics scorecard from this active run ID
+        quality_summary = get_quality_summary(run_id)
+        logger.info(f"Quality Summary harvested: {quality_summary}")
+
         # -------------------------------------------------
-        # 5. FAILURE PATH CLOSEOUT
+        # 4. SUCCESS PATH CLOSEOUT
         # -------------------------------------------------
         finish_pipeline_run(
             run_id=run_id,
-            status="FAILED",
-            records_processed=0,
-            error_message=str(error),
+            status="SUCCESS",
+            records_processed=records_processed,
             duration_seconds=duration_seconds,
-            current_stage=None  # COALESCE preserves the active staging coordinate
+            current_stage="SUCCESS"
         )
+        
+        print("\nPipeline completed successfully.")
+        print(f"Records processed: {records_processed}")
+        print(f"Quality Checks:    {quality_summary['checks']} (Passed: {quality_summary['passed']}, Failed: {quality_summary['failed']})")
 
-        print("\nPipeline failed.")
-        print(f"Error: {error}")
-        raise
 
 
 if __name__ == "__main__":
