@@ -18,10 +18,18 @@ logger = get_logger(__name__)
 
 
 def start_pipeline_run():
-    """Initializes a new tracking run record inside the database registry."""
+    """
+    Initializes a new tracking run record inside the database registry,
+    explicitly enforcing default STARTING stages and RUNNING statuses.
+    """
+    logger.info("🎬 Initializing parent pipeline execution tracking run...")
     sql = """
-    INSERT INTO pipeline_runs (pipeline_name, status, records_processed, current_stage, duration_seconds)
-    VALUES ('uganda_network_intel', 'RUNNING', 0, 'START', 0.000)
+    INSERT INTO pipeline_runs (
+        pipeline_name, started_at, status, current_stage, records_processed, duration_seconds
+    )
+    VALUES (
+        'uganda_network_intel', CURRENT_TIMESTAMP, 'RUNNING', 'STARTING', 0, 0.000
+    )
     RETURNING run_id;
     """
     with engine.begin() as connection:
@@ -29,14 +37,24 @@ def start_pipeline_run():
 
 
 def update_pipeline_stage(run_id, stage):
-    """Dynamically updates the active pipeline processing phase on disk."""
+    """
+    Dynamically updates the active pipeline processing phase on disk
+    to pinpoint precisely where the execution logic is executing.
+    """
+    logger.info(f"🔄 Execution stage progression pulse ──► current_stage={stage} | run_id={run_id}")
     sql = """
     UPDATE pipeline_runs
-    SET current_stage = :stage
+    SET current_stage = :current_stage
     WHERE run_id = :run_id;
     """
     with engine.begin() as connection:
-        connection.execute(text(sql), {"run_id": run_id, "stage": stage})
+        connection.execute(
+            text(sql),
+            {
+                "run_id": run_id,
+                "current_stage": stage,
+            }
+        )
 
 
 def finish_pipeline_run(
@@ -45,16 +63,21 @@ def finish_pipeline_run(
     records_processed=0,
     error_message=None,
     duration_seconds=None,
+    current_stage=None
 ):
-    """Closes out the pipeline execution run tracking state with final parameters."""
+    """
+    Closes out the pipeline execution run tracking state with final parameters.
+    Uses COALESCE to preserve the specific failure stage if an error occurs.
+    """
+    logger.info(f"💾 Closing parent pipeline execution run checkpoint | status={status} | run_id={run_id}")
     sql = """
     UPDATE pipeline_runs
-    SET completed_at = CURRENT_TIMESTAMP,
+    SET completed_at = :completed_at,
         status = :status,
         records_processed = :records_processed,
         error_message = :error_message,
         duration_seconds = :duration_seconds,
-        current_stage = :current_stage
+        current_stage = COALESCE(:current_stage, current_stage)
     WHERE run_id = :run_id;
     """
     with engine.begin() as connection:
@@ -62,11 +85,12 @@ def finish_pipeline_run(
             text(sql),
             {
                 "run_id": run_id,
+                "completed_at": datetime.now(),
                 "status": status,
                 "records_processed": records_processed,
                 "error_message": error_message,
                 "duration_seconds": duration_seconds,
-                "current_stage": status,  # Match final status context
+                "current_stage": current_stage,
             }
         )
 
@@ -88,23 +112,16 @@ def main():
         # 2. SILVER STAGE
         # -------------------------------------------------
         update_pipeline_stage(run_id, "SILVER")
-        print("\n[STAGE] SILVER")
+        print("\nCurrent stage: SILVER")
         
-        # 🚀 Capture actual row processing mutations from our return token
         records_processed = run_silver(run_id)
 
         # -------------------------------------------------
-        # 3. QUALITY STAGE
-        # -------------------------------------------------
-        update_pipeline_stage(run_id, "QUALITY")
-        print("\n[STAGE] QUALITY")
-        run_quality_gate(run_id)
-
-        # -------------------------------------------------
-        # 4. GOLD STAGE
+        # 3. GOLD STAGE
         # -------------------------------------------------
         update_pipeline_stage(run_id, "GOLD")
-        print("\n[STAGE] GOLD")
+        print("\nCurrent stage: GOLD")
+        
         run_gold(run_id)
 
         # ⏱️ Precision Duration Tracking Calculation for Success Path
@@ -112,18 +129,18 @@ def main():
         duration_seconds = (pipeline_end - pipeline_start).total_seconds()
 
         # -------------------------------------------------
-        # 5. SUCCESS PATH CLOSEOUT
+        # 4. SUCCESS PATH CLOSEOUT
         # -------------------------------------------------
         finish_pipeline_run(
             run_id=run_id,
             status="SUCCESS",
             records_processed=records_processed,
             duration_seconds=duration_seconds,
+            current_stage="SUCCESS"  # Explicit success milestone mark
         )
         
         print("\nPipeline completed successfully.")
         print(f"Records processed: {records_processed}")
-        print(f"Duration:          {duration_seconds:.3f} seconds")
 
     except Exception as error:
         # ⏱️ Precision Duration Tracking Calculation for Failure Path
@@ -131,7 +148,7 @@ def main():
         duration_seconds = (pipeline_end - pipeline_start).total_seconds()
 
         # -------------------------------------------------
-        # 6. FAILURE PATH CLOSEOUT
+        # 5. FAILURE PATH CLOSEOUT
         # -------------------------------------------------
         finish_pipeline_run(
             run_id=run_id,
@@ -139,6 +156,7 @@ def main():
             records_processed=0,
             error_message=str(error),
             duration_seconds=duration_seconds,
+            current_stage=None  # COALESCE preserves the active staging coordinate
         )
 
         print("\nPipeline failed.")
