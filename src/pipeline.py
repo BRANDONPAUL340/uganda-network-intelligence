@@ -82,7 +82,7 @@ def main():
     pipeline_start = datetime.now()
     print(f"\nPipeline run ID: {run_id}")
 
-    silver_records = 0
+    records_processed = 0
     try:
         # -------------------------------------------------
         # 2. SILVER STAGE
@@ -90,11 +90,8 @@ def main():
         update_pipeline_stage(run_id, "SILVER")
         print("\n[STAGE] SILVER")
         
-        silver_metrics = run_silver(run_id)
-        if isinstance(silver_metrics, dict):
-            silver_records = silver_metrics.get("total_processed", 0)
-        else:
-            silver_records = int(silver_metrics or 0)
+        # 🚀 Capture actual row processing mutations from our return token
+        records_processed = run_silver(run_id)
 
         # -------------------------------------------------
         # 3. QUALITY STAGE
@@ -120,12 +117,13 @@ def main():
         finish_pipeline_run(
             run_id=run_id,
             status="SUCCESS",
-            records_processed=silver_records,
+            records_processed=records_processed,
             duration_seconds=duration_seconds,
         )
         
         print("\nPipeline completed successfully.")
-        print(f"Duration: {duration_seconds:.3f} seconds")
+        print(f"Records processed: {records_processed}")
+        print(f"Duration:          {duration_seconds:.3f} seconds")
 
     except Exception as error:
         # ⏱️ Precision Duration Tracking Calculation for Failure Path
