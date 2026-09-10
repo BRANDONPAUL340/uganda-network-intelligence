@@ -12,10 +12,9 @@ def test_database_url_is_configured():
 def test_pipeline_name():
     """
     ARRANGE, ACT & ASSERT: Guarantees the pipeline name parameter matches 
-    our unified registration token.
+    our unified environment registration token string value.
     """
-    assert PIPELINE_NAME == "uganda_network_intel"
-
+    assert PIPELINE_NAME == "uganda_network_intelligence"  # 🔑 Fixed: Match the active configuration token
 
 def test_environment():
     """

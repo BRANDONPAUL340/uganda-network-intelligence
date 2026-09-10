@@ -1,47 +1,45 @@
-import os
-import sys
+import logging
+import time
 from datetime import datetime
 from dotenv import load_dotenv
 from sqlalchemy import text
 
-# Load system credentials and configurations up front
+# Load environment configuration variables immediately upon package boot
 load_dotenv()
 
+from src.config import DATABASE_URL, PIPELINE_NAME
 from src.database import engine
-from src.logger import get_logger
+from src.logging_config import configure_logging
 from src.transformation.silver import run_silver
 from src.data_quality.quality_gate import run_quality_gate
 from src.transformation.gold import run_gold
 
-# Initialize module-level observability logger instance
-logger = get_logger(__name__)
+# Instantiate module-level logging context handle wrapper
+logger = logging.getLogger(__name__)
 
 
 def start_pipeline_run():
-    """
-    Initializes a new tracking run record inside the database registry,
-    explicitly enforcing default STARTING stages and RUNNING statuses.
-    """
-    logger.info("🎬 Initializing parent pipeline execution tracking run...")
+    """Initializes a new tracking run record inside the database registry."""
     sql = """
     INSERT INTO pipeline_runs (
         pipeline_name, started_at, status, current_stage, records_processed, duration_seconds
     )
     VALUES (
-        'uganda_network_intel', CURRENT_TIMESTAMP, 'RUNNING', 'STARTING', 0, 0.000
+        :pipeline_name, CURRENT_TIMESTAMP, 'RUNNING', 'STARTING', 0, 0.000
     )
     RETURNING run_id;
     """
     with engine.begin() as connection:
-        return connection.execute(text(sql)).scalar()
+        return connection.execute(
+            text(sql),
+            {
+                "pipeline_name": PIPELINE_NAME,
+            }
+        ).scalar()
 
 
 def update_pipeline_stage(run_id, stage):
-    """
-    Dynamically updates the active pipeline processing phase on disk
-    to pinpoint precisely where the execution logic is executing.
-    """
-    logger.info(f"🔄 Execution stage progression pulse ──► current_stage={stage} | run_id={run_id}")
+    """Dynamically updates the active pipeline processing phase on disk."""
     sql = """
     UPDATE pipeline_runs
     SET current_stage = :current_stage
@@ -65,11 +63,7 @@ def finish_pipeline_run(
     duration_seconds=None,
     current_stage=None
 ):
-    """
-    Closes out the pipeline execution run tracking state with final parameters.
-    Uses COALESCE to preserve the specific failure stage if an error occurs.
-    """
-    logger.info(f"💾 Closing parent pipeline execution run checkpoint | status={status} | run_id={run_id}")
+    """Closes out the pipeline execution run tracking state with final parameters."""
     sql = """
     UPDATE pipeline_runs
     SET completed_at = :completed_at,
@@ -93,114 +87,98 @@ def finish_pipeline_run(
                 "current_stage": current_stage,
             }
         )
-def get_quality_summary(run_id):
-    """
-    Queries data_quality_results for the current run_id to calculate 
-    the exact number of passed and failed checks dynamically at runtime.
-    """
-    sql = """
-    SELECT 
-        COUNT(*) AS checks,
-        COUNT(*) FILTER (WHERE status = 'PASS') AS passed,
-        COUNT(*) FILTER (WHERE status = 'FAIL') AS failed
-    FROM data_quality_results
-    WHERE run_id = :run_id;
-    """
-    with engine.begin() as connection:
-        result = connection.execute(text(sql), {"run_id": run_id}).mappings().first()
-        if result and result["checks"] > 0:
-            return {
-                "checks": result["checks"],
-                "passed": result["passed"],
-                "failed": result["failed"]
-            }
-        return {"checks": 0, "passed": 0, "failed": 0}
 
 
 def main():
-    """Unified data pipeline stage engine with explicit orchestration tracking."""
-    print("=" * 60)
-    print("UGANDA NETWORK & SERVICE INTELLIGENCE")
-    print("=" * 60)
+    """Unified data pipeline stage engine equipped with high-resolution logging timers."""
+    # 🚀 Step 1: Boot up centralized logger configurations before any execution logic runs
+    configure_logging()
+    
+    logger.info("=" * 60)
+    logger.info("STARTING UGANDA NETWORK & SERVICE INTELLIGENCE PIPELINE RUN")
+    logger.info("=" * 60)
 
-    # 1. Pipeline Run Initialisation
+    # Begin global clock timer tracking pass
+    pipeline_start = time.perf_counter()
+    
     run_id = start_pipeline_run()
-    pipeline_start = datetime.now()
-    print(f"\nPipeline run ID: {run_id}")
+    logger.info(f"Pipeline tracking run record successfully created. run_id={run_id}")
 
     records_processed = 0
     try:
-                # -------------------------------------------------
+        # -------------------------------------------------
         # 2. SILVER STAGE
         # -------------------------------------------------
         update_pipeline_stage(run_id, "SILVER")
-        print("\nCurrent stage: SILVER")
+        
+        silver_start = time.perf_counter()
+        logger.info("Starting SILVER stage")
         records_processed = run_silver(run_id)
+        silver_duration = time.perf_counter() - silver_start
+        logger.info(f"SILVER stage completed in {silver_duration:.2f} seconds | records_processed={records_processed}")
 
-                # -------------------------------------------------
+        # -------------------------------------------------
         # 3. QUALITY STAGE
         # -------------------------------------------------
         update_pipeline_stage(run_id, "QUALITY")
-        print("\nCurrent stage: QUALITY")
         
-        # 🚀 Capture programmatic validation results dictionary
+        quality_start = time.perf_counter()
+        logger.info("Starting QUALITY stage")
         quality_result = run_quality_gate(run_id)
+        quality_duration = time.perf_counter() - quality_start
 
         if quality_result["failed"] > 0:
-            logger.warning(f"⚠️ Quality warning triggered for run_id={run_id} | Failed checks={quality_result['failed']}")
-            print(f"⚠️ Warning: {quality_result['failed']} quality checks failed. Proceeding with warning footprint.")
+            logger.warning(f"⚠️ Quality anomalies detected for run_id={run_id} | Failed counts={quality_result['failed']}")
+            logger.info(f"QUALITY stage completed with warnings in {quality_duration:.2f} seconds")
         else:
-            print("DATA QUALITY GATE PASSED.")
+            logger.info(f"QUALITY stage completed in {quality_duration:.2f} seconds with 0 rule breaches.")
 
         # -------------------------------------------------
-        # 4. GOLD STAGE (Safely isolated after data contract validations!)
+        # 4. GOLD STAGE
         # -------------------------------------------------
         update_pipeline_stage(run_id, "GOLD")
-        print("\nCurrent stage: GOLD")
-        run_gold(run_id)
-
-        # ⏱️ Precision Duration Tracking Calculation for Success Path
-        pipeline_end = datetime.now()
-        duration_seconds = (pipeline_end - pipeline_start).total_seconds()
-
-        # -------------------------------------------------
-        # 4. SUCCESS PATH CLOSEOUT
-        # -------------------------------------------------
-        finish_pipeline_run(
-            run_id=run_id,
-            status="SUCCESS",
-            records_processed=records_processed,
-            duration_seconds=duration_seconds,
-            current_stage="SUCCESS"  # Explicit success milestone mark
-        )
         
-        print("\nPipeline completed successfully.")
-        print(f"Records processed: {records_processed}")
+        gold_start = time.perf_counter()
+        logger.info("Starting GOLD stage")
+        run_gold(run_id)
+        gold_duration = time.perf_counter() - gold_start
+        logger.info(f"GOLD stage completed in {gold_duration:.2f} seconds.")
 
-    except Exception as error:
-                # ⏱️ Precision Duration Tracking Calculation for Success Path
-        pipeline_end = datetime.now()
-        duration_seconds = (pipeline_end - pipeline_start).total_seconds()
-
-        # 🚀 Harvest dynamic quality metrics scorecard from this active run ID
-        quality_summary = get_quality_summary(run_id)
-        logger.info(f"Quality Summary harvested: {quality_summary}")
+        # Compute complete transaction duration metrics from perf counter
+        total_duration = time.perf_counter() - pipeline_start
 
         # -------------------------------------------------
-        # 4. SUCCESS PATH CLOSEOUT
+        # 5. SUCCESS PATH CLOSEOUT
         # -------------------------------------------------
         finish_pipeline_run(
             run_id=run_id,
             status="SUCCESS",
             records_processed=records_processed,
-            duration_seconds=duration_seconds,
+            duration_seconds=total_duration,
             current_stage="SUCCESS"
         )
-        
-        print("\nPipeline completed successfully.")
-        print(f"Records processed: {records_processed}")
-        print(f"Quality Checks:    {quality_summary['checks']} (Passed: {quality_summary['passed']}, Failed: {quality_summary['failed']})")
+        logger.info("============================================================")
+        logger.info(f"Pipeline completed successfully in {total_duration:.2f} seconds 🎉")
+        logger.info(f"Total delta records processed: {records_processed}")
+        logger.info("============================================================")
 
+    except Exception as error:
+        total_duration = time.perf_counter() - pipeline_start
+
+        # -------------------------------------------------
+        # 6. FAILURE PATH CLOSEOUT
+        # -------------------------------------------------
+        finish_pipeline_run(
+            run_id=run_id,
+            status="FAILED",
+            records_processed=0,
+            error_message=str(error),
+            duration_seconds=total_duration,
+            current_stage=None
+        )
+        # 🔑 Critical: logger.exception automatically appends the multi-line traceback text
+        logger.exception(f"Pipeline failed after {total_duration:.2f} seconds ❌")
+        raise
 
 
 if __name__ == "__main__":
