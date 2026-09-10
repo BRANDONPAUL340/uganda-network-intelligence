@@ -1,20 +1,25 @@
-from src.config import (
-    DB_HOST,
-    DB_PORT,
-    DB_NAME,
-    DB_USER,
-    PIPELINE_NAME,
-)
+from src.config import DATABASE_URL, PIPELINE_NAME, ENVIRONMENT
 
 
-def test_database_configuration_exists():
-    """Verify that vital database properties are loaded into system memory."""
-    assert DB_HOST is not None
-    assert DB_PORT is not None
-    assert DB_NAME is not None
-    assert DB_USER is not None
+def test_database_url_is_configured():
+    """
+    ARRANGE, ACT & ASSERT: Verifies that a valid connection string 
+    is active and injected into the config layer.
+    """
+    assert DATABASE_URL
 
 
-def test_pipeline_name_matches_env():
-    """Asserts that the loaded pipeline signature matches our project identity."""
-    assert PIPELINE_NAME == "uganda_network_intelligence"
+def test_pipeline_name():
+    """
+    ARRANGE, ACT & ASSERT: Guarantees the pipeline name parameter matches 
+    our unified registration token.
+    """
+    assert PIPELINE_NAME == "uganda_network_intel"
+
+
+def test_environment():
+    """
+    ARRANGE, ACT & ASSERT: Confirms the operating framework maps only to a 
+    valid tier profile context.
+    """
+    assert ENVIRONMENT in {"development", "testing", "production"}
