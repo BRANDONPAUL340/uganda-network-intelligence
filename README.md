@@ -221,3 +221,14 @@ The `pipeline_operational_metrics` view exposes pipeline duration, SLA status, l
 - **PostgreSQL-backed data model**: Transactional relational repository mapping telecom metrics securely.
 - **Layered data architecture**: Clear isolation boundaries applied via Medallion staging, Silver, and Gold tiers.
 - **Data-quality validation**: Robust 18-point data quality gates tracking logical record parameters.
+### 🔄 Reproducible Database Setup
+
+The repository contains an automated, single-click database reproducibility script under:
+`database/schema.sql`
+
+The script defines the project's source staging tables, Silver denormalized wide models, Gold reporting aggregate cubes, data quality result matrices, pipeline execution stage logs, lineage traceability maps, and diagnostic monitoring view layers [INDEX].
+
+A clean, isolated PostgreSQL database instance can be constructed instantly using:
+```bash
+psql -U postgres -d network_intelligence -f database/schema.sql
+```
