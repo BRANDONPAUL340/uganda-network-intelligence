@@ -1,9 +1,17 @@
+import logging
 from sqlalchemy import text
 from src.database import engine
-from src.logger import get_logger
+from src.config import (
+    CRITICAL_AVAILABILITY_PCT,
+    CRITICAL_PACKET_LOSS_PCT,
+    CRITICAL_LATENCY_MS,
+    WARNING_AVAILABILITY_PCT,
+    WARNING_PACKET_LOSS_PCT,
+    WARNING_LATENCY_MS,
+)
 
-# Initialize package-level log recorder instance
-logger = get_logger(__name__)
+# Instantiate package-level logging context handle wrapper
+logger = logging.getLogger(__name__)
 
 
 def upgrade_silver_schemas():
@@ -101,7 +109,7 @@ def load_silver_measurements():
 def load_silver_network_health(latest_batch_id=3, run_id=112):
     """
     Computes an operational network health index metric out of clean raw fact attributes,
-    supporting incoming batch_id and run_id parameter dictionaries.
+    supporting incoming batch_id, run_id, and dynamic parameter thresholds.
     """
     logger.info("Executing operational health index calculations for silver_network_health...")
     sql = """
@@ -115,8 +123,16 @@ def load_silver_network_health(latest_batch_id=3, run_id=112):
         sm.equipment_id, sm.equipment_type, sm.manufacturer, sm.model, sm.traffic_mb, sm.latency_ms,
         sm.packet_loss_pct, sm.signal_strength_dbm, sm.availability_pct,
         CASE 
-            WHEN sm.availability_pct < 95 OR sm.packet_loss_pct > 5 OR sm.latency_ms > 70 THEN 'Critical'
-            WHEN sm.availability_pct < 98 OR sm.packet_loss_pct > 2 OR sm.latency_ms > 40 THEN 'Warning'
+            WHEN sm.availability_pct < :critical_availability 
+              OR sm.packet_loss_pct > :critical_packet_loss 
+              OR sm.latency_ms > :critical_latency 
+            THEN 'Critical'
+            
+            WHEN sm.availability_pct < :warning_availability 
+              OR sm.packet_loss_pct > :warning_packet_loss 
+              OR sm.latency_ms > :warning_latency 
+            THEN 'Warning'
+            
             ELSE 'Healthy'
         END AS health_status,
         CURRENT_TIMESTAMP, :batch_id, :run_id
@@ -124,7 +140,19 @@ def load_silver_network_health(latest_batch_id=3, run_id=112):
     ON CONFLICT (measurement_id) DO NOTHING;
     """
     with engine.begin() as connection:
-        result = connection.execute(text(sql), {"batch_id": latest_batch_id, "run_id": run_id})
+        result = connection.execute(
+            text(sql), 
+            {
+                "batch_id": latest_batch_id, 
+                "run_id": run_id,
+                "critical_availability": CRITICAL_AVAILABILITY_PCT,
+                "critical_packet_loss": CRITICAL_PACKET_LOSS_PCT,
+                "critical_latency": CRITICAL_LATENCY_MS,
+                "warning_availability": WARNING_AVAILABILITY_PCT,
+                "warning_packet_loss": WARNING_PACKET_LOSS_PCT,
+                "warning_latency": WARNING_LATENCY_MS,
+            }
+        )
         records_loaded = result.rowcount
         
         print(f"New network-health records loaded: {records_loaded}")
@@ -140,11 +168,12 @@ def run_silver(run_id=112):
     print("\n--- SILVER LAYER ---")
     upgrade_silver_schemas()
 
-    # 🚀 Interlock metrics tracking counters from row modifications
+    # Interlock metrics tracking counters from row modifications
     measurement_records = load_silver_measurements()
     
     # Execute downstream operational health evaluations
     load_silver_network_health(latest_batch_id=3, run_id=run_id)
     
+    print(f"Total Silver records processed: {measurement_records}")
     logger.info(f"Silver transformation stage complete | tracking_delta={measurement_records}")
     return measurement_records
