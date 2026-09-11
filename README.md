@@ -1,4 +1,9 @@
 # Uganda Network & Service Intelligence Platform
+# Uganda Network & Service Intelligence Platform
+
+![CI](https://github.com/BRANDONPAUL340/uganda-network-intelligence/actions/workflows/ci.yml/badge.svg)
+
+A production-oriented data engineering pipeline for transforming telecommunications network measurements into reliable operational and analytical insights.
 
 A production-oriented data engineering pipeline for transforming telecommunications network measurements into reliable operational and analytical insights.
 
