@@ -99,11 +99,11 @@ def load_silver_measurements():
     """
     with engine.begin() as connection:
         result = connection.execute(text(sql))
-        records_loaded = result.rowcount
+        records_loaded = result.rowcount  # 🕵️‍♂️ Captures row counts accurately
         
         print(f"New Silver measurements loaded: {records_loaded}")
         logger.info(f"Silver measurements tier populated | records_loaded={records_loaded}")
-        return records_loaded
+        return records_loaded  # 🔑 Explicitly return row counts to caller
 
 
 def load_silver_network_health(latest_batch_id=3, run_id=112):
@@ -153,27 +153,32 @@ def load_silver_network_health(latest_batch_id=3, run_id=112):
                 "warning_latency": WARNING_LATENCY_MS,
             }
         )
-        records_loaded = result.rowcount
+        records_loaded = result.rowcount  # 🕵️‍♂️ Captures row counts accurately
         
         print(f"New network-health records loaded: {records_loaded}")
         logger.info(f"Silver network health profiling completed | records_loaded={records_loaded}")
-        return records_loaded
+        return records_loaded  # 🔑 Explicitly return row counts to caller
+
 
 
 def run_silver(run_id=112):
     """
     Orchestrates the entire Silver layer transformation sweep.
-    Returns the count of newly processed metrics to the main pipeline.
+    Returns a dictionary map of newly processed row counts per target table.
     """
     print("\n--- SILVER LAYER ---")
     upgrade_silver_schemas()
 
-    # Interlock metrics tracking counters from row modifications
+    # 🚀 Interlock metrics tracking counters from row modifications
     measurement_records = load_silver_measurements()
-    
-    # Execute downstream operational health evaluations
-    load_silver_network_health(latest_batch_id=3, run_id=run_id)
+    health_records = load_silver_network_health(latest_batch_id=3, run_id=run_id)
     
     print(f"Total Silver records processed: {measurement_records}")
     logger.info(f"Silver transformation stage complete | tracking_delta={measurement_records}")
-    return measurement_records
+    
+    # 🔑 Fixed: Explicitly return the descriptive metrics dictionary mapping downstream
+    return {
+        "silver_measurements": measurement_records,
+        "silver_network_health": health_records
+    }
+

@@ -27,3 +27,7 @@ CRITICAL_LATENCY_MS = float(os.getenv("CRITICAL_LATENCY_MS", "70"))
 WARNING_AVAILABILITY_PCT = float(os.getenv("WARNING_AVAILABILITY_PCT", "98"))
 WARNING_PACKET_LOSS_PCT = float(os.getenv("PACKET_LOSS_PCT", "2"))
 WARNING_LATENCY_MS = float(os.getenv("WARNING_LATENCY_MS", "40"))
+# 🚀 Operational Service Level Agreement (SLA) Targets
+PIPELINE_SLA_SECONDS = float(os.getenv("PIPELINE_SLA_SECONDS", "60"))
+# 🚀 Operational Ingestion Freshness Targets
+MAX_DATA_FRESHNESS_DAYS = int(os.getenv("MAX_DATA_FRESHNESS_DAYS", "1"))
