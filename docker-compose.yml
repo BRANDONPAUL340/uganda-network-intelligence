@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  # 🛢️ 1. PostgreSQL Relational Database Service Node
+  postgres:
+    image: postgres:16-alpine  # Alpine base is highly recommended for faster portfolio loading
+    container_name: uganda_network_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: network_intelligence
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d network_intelligence"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # 🐍 2. Python Compute Data Pipeline Service Node
+  pipeline:
+    build:
+      context: .
+    container_name: uganda_network_pipeline
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/network_intelligence
+      PIPELINE_NAME: uganda_network_intelligence
+      ENVIRONMENT: docker
+      CRITICAL_AVAILABILITY_PCT: "95"
+      CRITICAL_PACKET_LOSS_PCT: "5"
+      CRITICAL_LATENCY_MS: "70"
+      WARNING_AVAILABILITY_PCT: "98"
+      WARNING_PACKET_LOSS_PCT: "2"
+      WARNING_LATENCY_MS: "40"
+      PIPELINE_SLA_SECONDS: "60"
+      MAX_DATA_FRESHNESS_DAYS: "1"
+    command: python -m src.pipeline
+
+volumes:
+  postgres_data:
