@@ -45,3 +45,35 @@ The schema file builds every required database entity table, structural constrai
 ## 🛡️ Reproducibility Guarantee
 
 The structural blueprint is fully transaction-isolated and self-contained. It is designed to cleanly build the required data architecture on a completely empty PostgreSQL database instance without depending on any pre-populated tables [INDEX].
+
+## 🔄 Database Migrations & Schema Versioning
+
+Database migrations provide a versioned history of schema changes, ensuring that the database can evolve over time without data loss [INDEX].
+
+Migration files are archived under:
+`database/migrations/`
+
+Files strictly follow a sequential numeric prefix naming convention:
+`NNN_description.sql`
+
+* `000_migration_tracking.sql` — Initializes the master version ledger.
+* `001_initial_schema.sql` — Establishes the project structural baseline milestone [INDEX].
+* `002_add_migration_checksum.sql` — Implements forward-only schema metadata extensions [INDEX].
+
+### 🛠️ Execution Command
+To manually run or synchronize the database migrations from the project root [INDEX]:
+```bash
+python -m src.migrations
+```
+The python migration engine checks the `schema_migrations` catalog table and only executes delta scripts that have not yet been recorded, ensuring absolute idempotency [INDEX].
+
+### 📊 Audit Log Tracking
+To query your structural evolution milestone log directly inside PostgreSQL [INDEX]:
+```sql
+SELECT version, description, applied_at
+FROM schema_migrations
+ORDER BY version;
+```
+
+### 🔒 Architectural Rules
+Applied migration scripts are permanently immutable and must never be altered [INDEX]. Subsequent database alterations must be deployed via a newly numbered sequential migration script (e.g., `003_xxx.sql`) to maintain an uncorrupted audit trail [INDEX].

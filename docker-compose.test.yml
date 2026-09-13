@@ -40,7 +40,9 @@ services:
       WARNING_LATENCY_MS: "40"
       PIPELINE_SLA_SECONDS: "60"
       MAX_DATA_FRESHNESS_DAYS: "1"
-    command: pytest -v
+        # 🚀 Fixed: Automatically execute migrations to build a fresh sandbox database before running pytest
+    command: sh -c "python -m src.migrations && pytest -v"
+
 
 volumes:
   postgres_test_data:

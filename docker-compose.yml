@@ -40,7 +40,9 @@ services:
       WARNING_LATENCY_MS: "40"
       PIPELINE_SLA_SECONDS: "60"
       MAX_DATA_FRESHNESS_DAYS: "1"
-    command: python -m src.pipeline
+        # 🚀 Fixed: Automatically execute migration scripts before running the ETL pipeline
+      command: sh -c "python -m src.migrations && python -m src.pipeline"
+
 
 volumes:
   postgres_data:
