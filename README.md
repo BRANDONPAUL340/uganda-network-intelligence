@@ -232,3 +232,36 @@ A clean, isolated PostgreSQL database instance can be constructed instantly usin
 ```bash
 psql -U postgres -d network_intelligence -f database/schema.sql
 ```
+---
+
+## 🌐 Multi-Environment Docker Orchestration Matrix
+
+The platform implements complete environmental isolation boundaries, decoupling core orchestration logic from environment-specific credentials and threshold settings [INDEX].
+
+### 1. Local Development Environment (Batch Processing Tiers)
+Launches the baseline cluster stack for standard feature validation loops:
+```bash
+docker compose up -d postgres
+docker compose up pipeline
+```
+
+### 2. Isolated Testing Environment (Sandbox Parity)
+Spins up a completely independent, sandboxed PostgreSQL database container on port **`5433`**, mounts a separate storage volume, and executes the `pytest` runner framework automatically inside an unprivileged environment context [INDEX]:
+```bash
+docker compose -f docker-compose.test.yml up -d postgres-test
+docker compose -f docker-compose.test.yml run --rm test
+```
+
+### 3. Hardened Production Environment (Variable-Driven Infrastructure)
+A variable-driven, production-hardened topology. All connection credentials, passwords, and service levels are injected at the container boundary using standard environment properties rather than being hardcoded into the source code or image layers [INDEX]:
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+```
+
+### 🔒 Operational Security Compliance
+The following private runtime environment configuration files house production connection parameters and **must never be committed to Git** [INDEX]:
+* `.env`
+* `.env.test`
+* `.env.production`
+
+Safe, version-controlled reference templates are archived under `.env.example`, `.env.test.example`, and `.env.prod.example` to ensure reproducible setups across any infrastructure machine [INDEX].

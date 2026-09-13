@@ -5,9 +5,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # 🔒 3. Harden Python execution configurations
-# Prevents Python from writing .pyc compilation cache files to disk
 ENV PYTHONDONTWRITEBYTECODE=1
-# Prevents Python from buffering stdout/stderr outputs to ensure logs stream in real-time
 ENV PYTHONUNBUFFERED=1
 
 # 📦 4. Unpack and layer platform dependencies
@@ -21,5 +19,12 @@ COPY tests ./tests
 COPY database ./database
 COPY README.md .
 
-# 🚀 6. Define the authoritative orchestration entrypoint instruction command
+# 🛡️ 6. Hardening Practice: Create an unprivileged system user and grant access permissions
+RUN useradd --create-home --shell /bin/bash appuser \
+    && chown -R appuser:appuser /app
+
+# 🔑 Drop root escalation capabilities completely for downstream execution threads
+USER appuser
+
+# 🚀 7. Authoritative orchestration entrypoint
 CMD ["python", "-m", "src.pipeline"]

@@ -19,3 +19,10 @@ logs/
 
 # 🔒 Critical Security Gate: Local Production Environment Secrets
 .env
+# 🔒 Isolate local runtime secrets and connection environment mappings
+.env
+.env.*
+
+# 🔓 Explicitly whitelist safe configuration template blueprints
+!.env.example
+!.env.test.example

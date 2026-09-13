@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  # 🛢️ 1. Sandboxed Test PostgreSQL DB Service Node
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: uganda_network_postgres_test
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: network_intelligence_test
+    ports:
+      - "5433:5432"  # Routed to 5433 locally to completely avoid host port collision blocks
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d network_intelligence_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # 🐍 2. Testing Python Pipeline Compute Node (Executes Pytest automatically!)
+  test:
+    build:
+      context: .
+    container_name: uganda_network_test
+    depends_on:
+      postgres-test:
+        condition: service_healthy  # Blocks execution until the test DB is fully online
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres-test:5432/network_intelligence_test
+      PIPELINE_NAME: uganda_network_intelligence_test
+      ENVIRONMENT: test
+      CRITICAL_AVAILABILITY_PCT: "95"
+      CRITICAL_PACKET_LOSS_PCT: "5"
+      CRITICAL_LATENCY_MS: "70"
+      WARNING_AVAILABILITY_PCT: "98"
+      WARNING_PACKET_LOSS_PCT: "2"
+      WARNING_LATENCY_MS: "40"
+      PIPELINE_SLA_SECONDS: "60"
+      MAX_DATA_FRESHNESS_DAYS: "1"
+    command: pytest -v
+
+volumes:
+  postgres_test_data:
