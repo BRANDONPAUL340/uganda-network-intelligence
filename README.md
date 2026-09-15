@@ -284,3 +284,40 @@ Invalid RAW records are never silently dropped or discarded. The platform enforc
 ```
 
 The quarantine tier isolates data corruption at the absolute perimeter. It preserves raw data records exactly as they arrived alongside critical operational debugging metadata (`rejection_reason`, `ingestion_batch_id`, `pipeline_run_id`, `rejected_at`). This ensures full auditability, giving data engineering teams the transparency needed to investigate upstream issues or safely trigger data re-processing runs without polluting production metrics [INDEX].
+### 🔄 Data Quarantine, Replayability, and Recovery Lifecycle
+
+The platform enforces a strict recovery boundary logic pattern for anomalous data. Records that break initial ingestion checks are safely isolated without altering the immutable raw source data lake:
+
+```text
+               [ Incoming Ingestion Streams ]
+                             │
+                             ▼
+                    [ raw_measurements ]
+                             │
+                             ▼
+                     RAW QUALITY CHECKS
+                             │
+              ┌──────────────┴──────────────┐
+              ▼                             ▼
+            VALID                        INVALID
+              │                             │
+              ▼                             ▼
+    [ silver_measurements ]     [ quarantined_measurements ]
+              ▲                      (status='QUARANTINED')
+              │                             │
+              │                      🔍 REVALIDATE LOOP
+              │                             │
+              │                      ┌──────┴──────┐
+              │                      ▼             ▼
+              │                    PASS           FAIL
+              │                      │             │
+              └───────── (Promote) ──┘             ▼
+                                            (Increment Attempts)
+                                                   │
+                                                   ▼
+                                            RETRY / REVIEW MAX
+                                           (status='REPROCESS_FAILED')
+```
+
+#### 🛡️ Governed Retry Safety Gates
+To prevent stuck infinite loops from freezing database compute resources, the platform uses controlled reprocessing sweeps. Each isolation row tracks its historical `reprocessing_attempts` counter. When a record fails revalidation repeatedly, its lifecycle state is marked as `REPROCESS_FAILED`, moving it into a queue for manual engineering review and source file reconciliation [INDEX].

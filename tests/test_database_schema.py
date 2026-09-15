@@ -14,7 +14,7 @@ def test_core_tables_exist():
         "data_quality_results",
         "raw_measurements",
         "ingestion_batches",
-        "quarantined_measurements",  # 🏗️ Added: Secure anomaly isolation vault
+        "quarantined_measurements",  # 🏗️ Active tracking ledger vault
         "silver_measurements",
         "silver_network_health",
         "gold_site_daily_performance",
