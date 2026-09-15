@@ -3,23 +3,22 @@ from src.database import engine
 
 
 def test_core_tables_exist():
-    """
-    ARRANGE, ACT & ASSERT: Queries the PostgreSQL system information catalog
-    to verify that all 11 core staging, Silver, Gold, and telemetry tracking
-    tables exist on disk.
-    """
     tables = {
         "sites",
         "equipment",
         "measurements",
         "incidents",
+        "pipeline_runs",
+        "pipeline_stage_runs",
+        "pipeline_lineage",
+        "data_quality_results",
+        "raw_measurements",
+        "ingestion_batches",
+        "quarantined_measurements",  # 🏗️ Added: Secure anomaly isolation vault
         "silver_measurements",
         "silver_network_health",
         "gold_site_daily_performance",
         "gold_equipment_health",
-        "pipeline_runs",
-        "pipeline_stage_runs",
-        "pipeline_lineage",
     }
 
     query = text("""

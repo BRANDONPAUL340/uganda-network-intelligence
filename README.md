@@ -265,3 +265,22 @@ The following private runtime environment configuration files house production c
 * `.env.production`
 
 Safe, version-controlled reference templates are archived under `.env.example`, `.env.test.example`, and `.env.prod.example` to ensure reproducible setups across any infrastructure machine [INDEX].
+### 🛡️ Rejected Data & Anomaly Handling
+
+Invalid RAW records are never silently dropped or discarded. The platform enforces a strict quarantine isolation loop:
+
+```text
+                 [ raw_measurements ]
+                          │
+          ┌───────────────┴───────────────┐
+          ▼                               ▼
+    [ Valid Rows ]                [ Invalid Rows ]
+          │                               │
+          ▼                               ▼
+[ silver_measurements ]      [ quarantined_measurements ]
+                             • Preserves raw row reference
+                             • Attaches error metadata tag
+                             • Binds batch & pipeline lineage
+```
+
+The quarantine tier isolates data corruption at the absolute perimeter. It preserves raw data records exactly as they arrived alongside critical operational debugging metadata (`rejection_reason`, `ingestion_batch_id`, `pipeline_run_id`, `rejected_at`). This ensures full auditability, giving data engineering teams the transparency needed to investigate upstream issues or safely trigger data re-processing runs without polluting production metrics [INDEX].
