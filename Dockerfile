@@ -8,10 +8,9 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# 📦 4. Unpack and layer platform dependencies
+# 📦 4. Unpack and layer platform dependencies (Optimized to skip redundant pip updates)
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # 🏗️ 5. Copy core application source code packages and validation tests
 COPY src ./src

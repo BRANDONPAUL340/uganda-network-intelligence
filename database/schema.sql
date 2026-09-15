@@ -50,6 +50,37 @@ CREATE TABLE IF NOT EXISTS incidents (
     description TEXT,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
+-- ----------------------------------------------------------------------------
+-- 0. IMMUTABLE RAW DATA LAKE BOUNDARY LAYER (New Landing Tier)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS raw_measurements (
+    raw_measurement_id BIGSERIAL PRIMARY KEY,
+    measurement_id BIGINT NOT NULL,
+    site_id INTEGER NOT NULL,
+    equipment_id INTEGER NOT NULL,
+    measurement_date DATE NOT NULL,
+    traffic_mb DECIMAL(12,2),
+    latency_ms DECIMAL(10,2),
+    packet_loss_pct DECIMAL(5,2),
+    signal_strength_dbm DECIMAL(6,2),
+    availability_pct DECIMAL(5,2),
+    source_file VARCHAR(255) NOT NULL, -- Hardened: Applied NOT NULL structural firewall
+    ingestion_run_id BIGINT,
+    ingested_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_raw_measurement_source UNIQUE (measurement_id, source_file)
+    ingestion_batch_id BIGINT,
+    
+    CONSTRAINT fk_raw_ingestion_batch 
+        FOREIGN KEY (ingestion_batch_id) 
+        REFERENCES ingestion_batches(batch_id) 
+        ON DELETE SET NULL
+
+);
+
+
+CREATE INDEX IF NOT EXISTS idx_raw_measurements_measurement_id ON raw_measurements(measurement_id);
+CREATE INDEX IF NOT EXISTS idx_raw_measurements_ingestion_run ON raw_measurements(ingestion_run_id);
+CREATE INDEX IF NOT EXISTS idx_raw_measurements_ingested_at ON raw_measurements(ingested_at);
 
 -- ----------------------------------------------------------------------------
 -- 2. SILVER TIER (Enriched Wide Models & Classifications)

@@ -1,15 +1,14 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: uganda_network_postgres
+    network_mode: host
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: network_intelligence
-    ports:
-      - "5432:5432"
     volumes:
-      - uganda-network-intelligence_postgres18_data:/var/lib/postgresql
+      - postgres18_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d network_intelligence"]
       interval: 5s
@@ -20,11 +19,9 @@ services:
     build:
       context: .
     container_name: uganda_network_pipeline
-    depends_on:
-      postgres:
-        condition: service_healthy
+    network_mode: host
     environment:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/network_intelligence
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/network_intelligence
       PIPELINE_NAME: uganda_network_intelligence
       ENVIRONMENT: podman
       CRITICAL_AVAILABILITY_PCT: "95"
@@ -38,5 +35,6 @@ services:
     command: sh -c "python -m src.migrations && python -m src.pipeline"
 
 volumes:
-  uganda-network-intelligence_postgres18_data:
+  postgres18_data:
     external: true
+    name: uganda-network-intelligence_postgres18_data
