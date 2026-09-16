@@ -1,17 +1,23 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: uganda_network_postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: network_intelligence
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - uganda-network-intelligence_postgres18_data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d network_intelligence"]
+      test:
+        - CMD
+        - pg_isready
+        - -U
+        - postgres
+        - -d
+        - network_intelligence
       interval: 5s
       timeout: 5s
       retries: 10

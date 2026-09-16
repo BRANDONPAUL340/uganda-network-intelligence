@@ -72,5 +72,21 @@ Implicit unique primary indexes (`raw\_measurements\_pkey`, `silver\_measurement
 
 2\. \*\*Planner Math Safety Gates:\*\* Just because an index is live on disk does not mean the query planner will use it. For small datasets that fit into a single cache block (`shared hit=1`), PostgreSQL will choose a sequential scan (`Seq Scan`) because reading the pages directly is significantly cheaper than traversing an index tree \[INDEX].
 
+---
+
+## 📊 Day 92 High-Resolution Performance Findings
+
+### 🧠 Cost-Based Query Planning
+The PostgreSQL optimizer dynamically selects execution paths (e.g., swapping between sequential scans, index scans, hash joins, or nested loops) by evaluating table row statistics, available indexes, and internal data distribution weights [INDEX].
+
+### 🏎️ Sequential Scan Analysis
+A sequential scan (`Seq Scan`) is a highly efficient database operation for smaller table layers [INDEX]. For small data sizes, the database planner correctly calculates that reading a page straight out of RAM cache is faster than traversing an entire index tree [INDEX].
+
+### 🎯 Composite Index Selectivity Column Rules
+The sorting sequence inside a composite index determines how useful it is [INDEX]. Our performance index **`idx_silver_site_date`** uses the order **`(site_id, measured_at)`**, which matches the platform's query patterns perfectly while supporting single `site_id` looks ups via the leftmost column rule [INDEX].
+
+### 📅 Scalability Partitioning Limits
+Physical table range partitioning by date is a powerful way to enable partition pruning at enterprise scale, but it is not needed for our current dataset size [INDEX]. We will continue to track performance metrics to determine the exact moment to deploy time-sliced table partitioning [INDEX].
+
 
 
