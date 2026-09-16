@@ -20,17 +20,17 @@ def get_latest_raw_id():
 
 def advance_processing_watermark(source_name="measurements"):
     """
-    Orchestration Hook: Safely advances the watermark state boundary registry to match the latest raw primary key.
-    Ensures that high-watermark updates are decoupled from insert processes [INDEX].
+    Orchestration Hook: Safely advances the watermark state boundary registry for the SILVER stage [INDEX].
     """
     latest_id = get_latest_raw_id()
-    logger.info(f"Advancing orchestrator high-watermark state for source=[{source_name}] to last_id={latest_id}...")
+    logger.info(f"Advancing SILVER stage high-watermark state for source=[{source_name}] to last_id={latest_id}...")
 
     update_watermark(
         PIPELINE_NAME,
+        "SILVER",
         source_name,
         latest_id,
     )
 
-    logger.info("Orchestration watermark state successfully locked onto disk.")
+    logger.info("SILVER stage orchestration watermark state successfully locked onto disk.")
     return latest_id

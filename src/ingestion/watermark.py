@@ -5,15 +5,17 @@ from src.database import engine
 logger = logging.getLogger(__name__)
 
 
-def get_watermark(pipeline_name, source_name):
+def get_watermark(pipeline_name, stage_name, source_name):
     """
-    Looks up the last successfully processed raw_measurement_id boundary mark.
-    Returns 0 if no record exists yet for this specific pipeline source target.
+    Looks up the last successfully processed raw_measurement_id boundary mark
+    for a specific pipeline name, execution stage, and source target [INDEX].
+    Returns 0 if no checkpoint record exists yet [INDEX].
     """
     query = text("""
         SELECT last_raw_measurement_id
         FROM processing_watermarks
         WHERE pipeline_name = :pipeline_name
+          AND stage_name = :stage_name
           AND source_name = :source_name;
     """)
 
@@ -22,6 +24,7 @@ def get_watermark(pipeline_name, source_name):
             query,
             {
                 "pipeline_name": pipeline_name,
+                "stage_name": stage_name,
                 "source_name": source_name,
             },
         ).scalar_one_or_none()
@@ -29,24 +32,30 @@ def get_watermark(pipeline_name, source_name):
     return result if result is not None else 0
 
 
-def update_watermark(pipeline_name, source_name, last_raw_measurement_id):
+def update_watermark(pipeline_name, stage_name, source_name, last_raw_measurement_id):
     """
-    Upserts the tracking state watermark for a given pipeline source target block.
+    Upserts the tracking state watermark for a given pipeline, stage, and source target block.
+    Uses 'ON CONFLICT (pipeline_name, stage_name, source_name)' to overwrite boundaries idempotently [INDEX].
     """
-    logger.info(f"Upserting processing checkpoint state: {pipeline_name}/{source_name} -> last_id={last_raw_measurement_id}")
+    logger.info(
+        f"Upserting processing checkpoint state: {pipeline_name}/{stage_name}/{source_name} "
+        f"-> last_id={last_raw_measurement_id}"
+    )
     
     query = text("""
         INSERT INTO processing_watermarks (
             pipeline_name,
+            stage_name,
             source_name,
             last_raw_measurement_id
         )
         VALUES (
             :pipeline_name,
+            :stage_name,
             :source_name,
             :last_raw_measurement_id
         )
-        ON CONFLICT (pipeline_name, source_name)
+        ON CONFLICT (pipeline_name, stage_name, source_name)
         DO UPDATE SET
             last_raw_measurement_id = EXCLUDED.last_raw_measurement_id,
             updated_at = CURRENT_TIMESTAMP;
@@ -57,15 +66,16 @@ def update_watermark(pipeline_name, source_name, last_raw_measurement_id):
             query,
             {
                 "pipeline_name": pipeline_name,
+                "stage_name": stage_name,
                 "source_name": source_name,
                 "last_raw_measurement_id": last_raw_measurement_id,
             },
         )
 
 
-def advance_watermark(pipeline_name, source_name, processed_raw_measurement_id):
+def advance_watermark(pipeline_name, stage_name, source_name, processed_raw_measurement_id):
     """
     Safer production wrapper: Explicitly updates the tracking state boundary pointer
     only after the orchestration layer confirms the incremental stage has succeeded completely.
     """
-    update_watermark(pipeline_name, source_name, processed_raw_measurement_id)
+    update_watermark(pipeline_name, stage_name, source_name, processed_raw_measurement_id)

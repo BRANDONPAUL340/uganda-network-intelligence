@@ -76,6 +76,16 @@ CREATE TABLE IF NOT EXISTS raw_measurements (
         ON DELETE SET NULL
 
 );
+CREATE TABLE IF NOT EXISTS processing_watermarks (
+    watermark_id BIGSERIAL PRIMARY KEY,
+    pipeline_name VARCHAR(255) NOT NULL,
+    stage_name VARCHAR(50) NOT NULL,
+    source_name VARCHAR(255) NOT NULL,
+    last_raw_measurement_id BIGINT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_processing_watermark_stage UNIQUE (pipeline_name, stage_name, source_name)
+);
+
 
 
 CREATE INDEX IF NOT EXISTS idx_raw_measurements_measurement_id ON raw_measurements(measurement_id);
