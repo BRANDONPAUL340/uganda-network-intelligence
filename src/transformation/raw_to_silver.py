@@ -13,7 +13,7 @@ def get_new_raw_measurements(source_name="measurements"):
     Diagnostic Delta Extractor Module: Queries the raw landing tier catalog.
     Extracts *only* rows that arrived after the watermark checkpoint checkpoint [INDEX].
     """
-    last_id = get_watermark(PIPELINE_NAME, source_name)
+    last_id = get_watermark(PIPELINE_NAME, "SILVER", source_name)
     logger.info(f"Extracting new delta tracks above high-watermark pointer: last_id={last_id}")
 
     query = text("""
@@ -46,7 +46,7 @@ def promote_incremental_raw_to_silver(source_name="measurements"):
     Employs 'ON CONFLICT DO NOTHING' to protect destination data layers against rerun duplication bloat [INDEX].
     Intentionally does NOT advance the watermark pointer to keep transaction steps safe [INDEX].
     """
-    last_id = get_watermark(PIPELINE_NAME, source_name)
+    last_id = get_watermark(PIPELINE_NAME, "SILVER", source_name)
     logger.info(f"Initializing safe idempotent incremental promotion pass above watermark={last_id}")
 
     # Note: Target maps to 'measured_at' to match your production database schema fields perfectly
@@ -121,7 +121,7 @@ def promote_raw_to_silver():
 
 def promote_new_raw_to_silver(source_name="measurements"):
     """Lineage-advancing incremental load module step."""
-    last_id = get_watermark(PIPELINE_NAME, source_name)
+    last_id = get_watermark(PIPELINE_NAME, "SILVER", source_name)
     query = text("""
         INSERT INTO silver_measurements (
             measurement_id, site_id, equipment_id, measured_at,
