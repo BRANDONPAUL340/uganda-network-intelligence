@@ -189,4 +189,34 @@ The dashboard Python module should also pass compilation before deployment:
 
 ```text
 python -m py_compile src/monitoring/dashboard.py
+
+---
+
+## 🎛️ Multidimensional Interactive Filters
+The operations cockpit implements an advanced cascading filter mechanism [INDEX]:
+* **Geographical Region Slicing:** Dynamically isolates regional data blocks [INDEX].
+* **Cascading District Slicing:** Automatically filters district dropdown choices based on the selected region [INDEX].
+* **Timeline Date Range Picker:** Slices out custom chronological windows using secure named SQL parameters [INDEX].
+* **Granular Site Drill-Down:** Allows operators to filter down and view daily performance logs for individual cell towers [INDEX].
+
+## 📊 Executive Network Performance KPIs
+The summary matrix layer computes six central performance indicators using a single database calculation loop [INDEX]:
+* **Active Monitored Sites:** Distinct count of active cellular tower locations [INDEX].
+* **Total Measurements:** Cumulative count of successfully ingested telemetry records [INDEX].
+* **Average Network Traffic (MB):** Data volume trends across selected boundaries [INDEX].
+* **Average Latency (ms):** Raw round-trip response timing tracking SLA limits [INDEX].
+* **Average Network Packet Loss (%):** Core network quality metrics [INDEX].
+* **Core Network Availability (%):** Platform availability percentage calculation [INDEX].
+
+## 📈 Rich Visualizations & Chart Controls
+The presentation layer implements interactive Plotly charts to expose trends [INDEX]:
+* **Horizontal Site Availability Bar Chart:** Quickly isolates which specific towers have lower availability [INDEX].
+* **Vertical Latency Analyzer Bar Chart:** Instantly tracks latency variations across different tower locations [INDEX].
+* **Network Traffic Line Chart:** Plots data volume changes over time to monitor bandwidth trends [INDEX].
+* **Pipeline Health State Distribution Pie Chart:** Summarizes pipeline status categories across your history log [INDEX].
+* **Platform Availability Timeline Line Graph:** Tracks long-term platform stability over time [INDEX].
+
+## 🧠 Core Data Architecture Boundary Rules
+**The dashboard remains a presentation layer.** All business rules, threshold calculations, data quality filters, and aggregation logic remain in the PostgreSQL reporting views. The frontend dashboard focuses exclusively on visualization, while your containerized database tier handles all data crunching [INDEX].
+
 ```

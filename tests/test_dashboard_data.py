@@ -35,3 +35,9 @@ def test_site_performance_returns_dataframe():
     """ARRANGE, ACT & ASSERT: Verifies Gold-tier site analytical data fetching executes correctly [INDEX]."""
     result = get_site_performance()
     assert result is not None
+from src.dashboard.data import check_database_connection
+
+
+def test_database_connection():
+    """ARRANGE, ACT & ASSERT: Integration check to guarantee the dashboard's internal heartbeat function detects live database pools [INDEX]."""
+    assert check_database_connection() is True

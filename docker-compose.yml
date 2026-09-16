@@ -1,3 +1,4 @@
+
 services:
   postgres:
     image: postgres:18-alpine
@@ -33,15 +34,38 @@ services:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/network_intelligence
       PIPELINE_NAME: uganda_network_intelligence
       ENVIRONMENT: podman
+
       CRITICAL_AVAILABILITY_PCT: "95"
       CRITICAL_PACKET_LOSS_PCT: "5"
       CRITICAL_LATENCY_MS: "70"
+
       WARNING_AVAILABILITY_PCT: "98"
       WARNING_PACKET_LOSS_PCT: "2"
       WARNING_LATENCY_MS: "40"
+
       PIPELINE_SLA_SECONDS: "60"
       MAX_DATA_FRESHNESS_DAYS: "1"
-    command: sh -c "python -m src.migrations && python -m src.pipeline"
+    command:
+      - sh
+      - -c
+      - python -m src.migrations && python -m src.pipeline
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Containerfile
+    container_name: uganda_network_dashboard
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DASHBOARD_TITLE: "Uganda Network & Service Intelligence"
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/network_intelligence
+      ENVIRONMENT: dashboard
+      PIPELINE_NAME: uganda_network_intelligence
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
 
 volumes:
   uganda-network-intelligence_postgres18_data:
