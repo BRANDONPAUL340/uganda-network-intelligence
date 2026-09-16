@@ -5,96 +5,145 @@ from src.database import engine
 logger = logging.getLogger(__name__)
 
 
-def load_gold_site_daily_performance(run_id):
-    """Computes daily geographical site aggregations and returns written row counts."""
-    sql = """
-    INSERT INTO gold_site_daily_performance (
-        site_id, site_name, measurement_date, measurement_count, avg_traffic_mb,
-        avg_latency_ms, avg_packet_loss_pct, avg_signal_strength_dbm, avg_availability_pct
-    )
-    SELECT 
-        site_id, 
-        MAX(site_name), 
-        measured_at::DATE, 
-        COUNT(*), 
-        AVG(traffic_mb),
-        AVG(latency_ms), 
-        AVG(packet_loss_pct), 
-        AVG(signal_strength_dbm), 
-        AVG(availability_pct)
-    FROM silver_measurements
-    GROUP BY site_id, measured_at::DATE
-    ON CONFLICT (site_id, measurement_date) DO UPDATE SET
-        measurement_count = EXCLUDED.measurement_count,
-        avg_traffic_mb = EXCLUDED.avg_traffic_mb,
-        avg_latency_ms = EXCLUDED.avg_latency_ms,
-        avg_packet_loss_pct = EXCLUDED.avg_packet_loss_pct,
-        avg_signal_strength_dbm = EXCLUDED.avg_signal_strength_dbm,
-        avg_availability_pct = EXCLUDED.avg_availability_pct;
+def get_affected_site_dates(min_raw_measurement_id):
     """
+    Diagnostic Selector: Identifies which specific site and date combinations 
+    were affected by the latest raw data delta slice above the watermark pointer [INDEX].
+    Uses 'measured_at' to match your production Silver table layout [INDEX].
+    """
+    logger.info(f"Scanning for affected site/date partitions above raw_id={min_raw_measurement_id}")
+    
+    query = text("""
+        SELECT DISTINCT
+            site_id,
+            measured_at AS measurement_date
+        FROM silver_measurements
+        WHERE measurement_id IN (
+            SELECT r.measurement_id
+            FROM raw_measurements r
+            WHERE r.raw_measurement_id > :min_raw_measurement_id
+        )
+        ORDER BY site_id, measured_at;
+    """)
+
+    with engine.connect() as connection:
+        rows = connection.execute(
+            query,
+            {
+                "min_raw_measurement_id": min_raw_measurement_id,
+            },
+        ).mappings().all()
+
+    logger.info(f"Analysis complete. Affected site/date grains located: {len(rows)}")
+    return rows
+
+
+def refresh_gold_site_daily_incremental(min_raw_measurement_id):
+    """
+    High-Performance Gold Incremental Updater: Recalculates aggregates ONLY for the 
+    affected site/date slices using an idempotent merge upsert pattern [INDEX].
+    Leaves historical analytics cubes completely untouched [INDEX].
+    """
+    affected = get_affected_site_dates(min_raw_measurement_id)
+
+    if not affected:
+        logger.info("No affected site/date grains detected. Skipping Gold update pass.")
+        return 0
+
+    logger.info(f"Executing incremental Gold upsert block for {len(affected)} target dimensions...")
+
+    query = text("""
+        INSERT INTO gold_site_daily_performance (
+            site_id,
+            site_name,
+            region,
+            district,
+            measurement_date,
+            measurement_count,
+            avg_traffic_mb,
+            avg_latency_ms,
+            avg_packet_loss_pct,
+            avg_signal_strength_dbm,
+            avg_availability_pct
+        )
+        SELECT
+            s.site_id,
+            s.site_name,
+            s.region,
+            s.district,
+            sm.measured_at AS measurement_date,
+            COUNT(*) AS measurement_count,
+            ROUND(AVG(sm.traffic_mb)::numeric, 2),
+            ROUND(AVG(sm.latency_ms)::numeric, 2),
+            ROUND(AVG(sm.packet_loss_pct)::numeric, 2),
+            ROUND(AVG(sm.signal_strength_dbm)::numeric, 2),
+            ROUND(AVG(sm.availability_pct)::numeric, 2)
+        FROM silver_measurements sm
+        JOIN sites s ON s.site_id = sm.site_id
+        WHERE (sm.site_id, sm.measured_at) IN (
+            SELECT DISTINCT
+                site_id,
+                measured_at
+            FROM silver_measurements
+            WHERE measurement_id IN (
+                SELECT r.measurement_id
+                FROM raw_measurements r
+                WHERE r.raw_measurement_id > :min_raw_measurement_id
+            )
+        )
+        GROUP BY
+            s.site_id,
+            s.site_name,
+            s.region,
+            s.district,
+            sm.measured_at
+        ON CONFLICT (site_id, measurement_date)
+        DO UPDATE SET
+            site_name = EXCLUDED.site_name,
+            region = EXCLUDED.region,
+            district = EXCLUDED.district,
+            measurement_count = EXCLUDED.measurement_count,
+            avg_traffic_mb = EXCLUDED.avg_traffic_mb,
+            avg_latency_ms = EXCLUDED.avg_latency_ms,
+            avg_packet_loss_pct = EXCLUDED.avg_packet_loss_pct,
+            avg_signal_strength_dbm = EXCLUDED.avg_signal_strength_dbm,
+            avg_availability_pct = EXCLUDED.avg_availability_pct;
+    """)
+
     with engine.begin() as connection:
-        result = connection.execute(text(sql))
-        return result.rowcount
+        result = connection.execute(
+            query,
+            {
+                "min_raw_measurement_id": min_raw_measurement_id,
+            },
+        )
+        row_count = result.rowcount
+
+    logger.info(f"Incremental Gold upsert execution complete. Modified records: {row_count}")
+    return row_count
 
 
-def load_gold_equipment_health(run_id):
-    """
-    Computes downstream hardware asset ranking metrics and returns written row counts.
-    Groups strictly by equipment_id to safely avoid CardinalityViolation exceptions.
-    """
-    sql = """
-    INSERT INTO gold_equipment_health (
-        equipment_id, equipment_type, manufacturer, model, measurement_count,
-        avg_latency_ms, avg_packet_loss_pct, avg_availability_pct, health_status
-    )
-    SELECT 
-        equipment_id, 
-        MAX(equipment_type), 
-        MAX(manufacturer), 
-        MAX(model), 
-        COUNT(*),
-        AVG(latency_ms), 
-        AVG(packet_loss_pct), 
-        AVG(availability_pct),
-        CASE 
-            WHEN AVG(availability_pct) < 95 THEN 'Critical'
-            WHEN AVG(availability_pct) < 98 THEN 'Warning'
-            ELSE 'Healthy'
-        END
-    FROM silver_network_health
-    GROUP BY equipment_id
-    ON CONFLICT (equipment_id) DO UPDATE SET
-        measurement_count = EXCLUDED.measurement_count,
-        avg_latency_ms = EXCLUDED.avg_latency_ms,
-        avg_packet_loss_pct = EXCLUDED.avg_packet_loss_pct,
-        avg_availability_pct = EXCLUDED.avg_availability_pct,
-        health_status = EXCLUDED.health_status;
-    """
+def run_gold():
+    """Legacy full-load fallback method for backwards-compatibility checks."""
+    logger.info("Running baseline legacy full Gold aggregate rebuild sweep...")
+    query = text("""
+        INSERT INTO gold_site_daily_performance (
+            site_id, site_name, region, district, measurement_date,
+            measurement_count, avg_traffic_mb, avg_latency_ms, avg_packet_loss_pct,
+            avg_signal_strength_dbm, avg_availability_pct
+        )
+        SELECT
+            s.site_id, s.site_name, s.region, s.district, sm.measured_at,
+            COUNT(*), ROUND(AVG(sm.traffic_mb)::numeric, 2), ROUND(AVG(sm.latency_ms)::numeric, 2),
+            ROUND(AVG(sm.packet_loss_pct)::numeric, 2), ROUND(AVG(sm.signal_strength_dbm)::numeric, 2),
+            ROUND(AVG(sm.availability_pct)::numeric, 2)
+        FROM silver_measurements sm
+        JOIN sites s ON s.site_id = sm.site_id
+        GROUP BY s.site_id, s.site_name, s.region, s.district, sm.measured_at
+        ON CONFLICT (site_id, measurement_date) DO UPDATE SET
+            measurement_count = EXCLUDED.measurement_count,
+            avg_traffic_mb = EXCLUDED.avg_traffic_mb;
+    """)
     with engine.begin() as connection:
-        result = connection.execute(text(sql))
+        result = connection.execute(query)
         return result.rowcount
-
-
-def run_gold(run_id=112):
-    """
-    Orchestrates the entire Gold layer analytical summary sweep.
-    Returns a dictionary map of newly processed row counts per target table.
-    """
-    print("\n--- GOLD LAYER ---")
-    logger.info(f"Initializing Gold analytical layer calculation loop for run_id={run_id}")
-    
-    print("Refreshing gold_site_daily_performance aggregates...")
-    site_count = load_gold_site_daily_performance(run_id)
-    
-    print("Refreshing gold_equipment_health aggregates...")
-    equipment_count = load_gold_equipment_health(run_id)
-    
-    print(f"Gold site performance aggregations refreshed: {site_count}")
-    print(f"Gold equipment health metrics scorecards refreshed: {equipment_count}")
-    
-    logger.info(f"Gold layer processing complete | site_records={site_count} | equipment_records={equipment_count}")
-    
-    return {
-        "gold_site_daily_performance": site_count,
-        "gold_equipment_health": equipment_count
-    }
