@@ -1,5 +1,5 @@
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 import pandas as pd
 
@@ -15,25 +15,32 @@ import plotly.express as px
 import streamlit as st
 
 from src.config import PIPELINE_NAME
+from src.dashboard.health import check_dashboard_database
+from src.dashboard.version import DASHBOARD_VERSION
 from src.dashboard.data import (
     check_database_connection,
     get_current_health,
     get_daily_health,
+    get_database_activity,
     get_network_summary,
     get_pipeline_kpis,
     get_site_performance,
     get_stage_summary,
 )
 
-# Page Layout Configurations
+# 1. Page Presentation Setup
 st.set_page_config(
     page_title="Uganda Network & Service Intelligence",
     page_icon="📡",
     layout="wide",
 )
 
+# 12. Add a persistent rendering timezone stamp token
+dashboard_checked_at = datetime.now(timezone.utc)
+
 st.title("📡 Uganda Network & Service Intelligence")
-st.caption(f"Operational Monitoring & Network Performance KPI Center — Pipeline: {PIPELINE_NAME}")
+st.caption(f"Operational Monitoring Dashboard — Pipeline: {PIPELINE_NAME}")
+st.caption(f"Dashboard snapshot timestamp: {dashboard_checked_at:%Y-%m-%d %H:%M:%S} UTC")
 
 # Operational Cache Management Control
 if st.button("🔄 Refresh Data"):
@@ -52,9 +59,22 @@ if not check_database_connection():
 
 
 # ==============================================================================
-# 🎛️ SIDEBAR INTERACTIVE CONTROL FILTERS
+# 🎛️ SIDEBAR INTERACTIVE CONTROL FILTERS & LIVE HEALTH INDICATOR
 # ==============================================================================
 st.sidebar.header("Dashboard Filters")
+
+# Execute live application-tier heartbeat telemetry pass [INDEX]
+dashboard_health = check_dashboard_database()
+
+if dashboard_health["status"] == "HEALTHY":
+    st.sidebar.success("Database: Healthy")
+elif dashboard_health["status"] == "WARNING":
+    st.sidebar.warning("Database: Warning")
+else:
+    st.sidebar.error("Database: Critical")
+
+# 13. Expose application deployment build footprints
+st.sidebar.caption(f"Dashboard version: {DASHBOARD_VERSION}")
 
 try:
     all_sites_base = get_site_performance()
@@ -133,7 +153,7 @@ st.header("🟢 Current Pipeline Health")
 if current_health.empty:
     st.warning("No pipeline health data is available.")
 else:
-    health = current_health.iloc[0]
+    health = current_health.iloc
     status = health["overall_status"]
 
     if status == "HEALTHY":
@@ -157,7 +177,7 @@ st.header("📊 Executive Performance KPIs")
 if kpis.empty:
     st.info("No KPI data is available.")
 else:
-    kpi = kpis.iloc[0]
+    kpi = kpis.iloc
     col1, col2, col3, col4 = st.columns(4)
 
     col1.metric("Pipeline Success Rate", f"{kpi['pipeline_success_rate']:.2f}%")
@@ -172,10 +192,10 @@ else:
 st.markdown("---")
 st.header("📡 Network Performance Summary")
 
-if network_summary.empty or network_summary.iloc[0]["total_sites"] is None:
+if network_summary.empty or network_summary.iloc["total_sites"] is None:
     st.warning("No network performance data matches the selected filter criteria.")
 else:
-    summary = network_summary.iloc[0]
+    summary = network_summary.iloc
     col_kpi1, col_kpi2, col_kpi3, col_kpi4, col_kpi5 = st.columns(5)
 
     col_kpi1.metric("Active Sites", int(summary["total_sites"] or 0))

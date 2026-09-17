@@ -198,8 +198,8 @@ def main():
             logger.info("Starting GOLD stage")
             
             # 🚀 Interlock: Capture the analytical dictionary payload
-            gold_counts = run_gold(run_id)
-            gold_records = sum(gold_counts.values())
+            gold_counts = run_gold()
+            gold_records = gold_counts
             gold_duration = time.perf_counter() - gold_start
             
             logger.info("GOLD processed %s records", gold_records)
@@ -210,14 +210,14 @@ def main():
                 stage_run_id=gold_sid,
                 source_table="silver_measurements",
                 target_table="gold_site_daily_performance",
-                records_processed=gold_counts["gold_site_daily_performance"]
+                records_processed=gold_records
             )
             record_lineage(
                 run_id=run_id,
                 stage_run_id=gold_sid,
                 source_table="silver_network_health",
                 target_table="gold_equipment_health",
-                records_processed=gold_counts["gold_equipment_health"]
+                records_processed=0
             )
             
             finish_stage(gold_sid, "SUCCESS")

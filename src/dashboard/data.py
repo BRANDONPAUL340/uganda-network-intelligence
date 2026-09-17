@@ -1,252 +1,149 @@
-
-from datetime import date
-from typing import Optional
-
+from time import perf_counter
 import pandas as pd
+import streamlit as st
 from sqlalchemy import text
-
-from src.config import PIPELINE_NAME
 from src.database import engine
+from src.dashboard.logging import get_dashboard_logger
+
+logger = get_dashboard_logger()
 
 
 def check_database_connection() -> bool:
-    '''
-    Return True when PostgreSQL is reachable, otherwise False.
-    '''
+    """
+    Heartbeat Connectivity Checker: Runs a lightweight diagnostic pass 
+    to verify database connection pool availability [INDEX].
+    """
     try:
         with engine.connect() as connection:
-            connection.execute(text('SELECT 1'))
+            connection.execute(text("SELECT 1;"))
         return True
     except Exception:
         return False
 
 
+def read_query(query: str, query_name: str = "dashboard_query", params: dict = None) -> pd.DataFrame:
+    """
+    Observable Query Execution Engine: Captures precise runtime stopwatch metrics 
+    and row counts, logging exceptions automatically if a query fails [INDEX].
+    """
+    start = perf_counter()
+    try:
+        with engine.connect() as connection:
+            result = pd.read_sql(text(query), connection, params=params)
+
+        duration = perf_counter() - start
+        logger.info(
+            "Dashboard query completed successfully: name=%s duration=%.4fs rows=%d",
+            query_name,
+            duration,
+            len(result),
+        )
+        return result
+
+    except Exception as e:
+        duration = perf_counter() - start
+        logger.exception(
+            "Dashboard query execution failed completely: name=%s duration=%.4fs | Error: %s",
+            query_name,
+            duration,
+            str(e),
+        )
+        raise
+
+
+# (Keep your check_database_connection and read_query functions exactly as they are)
+
+@st.cache_data(ttl=60)
 def get_pipeline_kpis() -> pd.DataFrame:
-    '''
-    Return the current operational KPI summary.
-    '''
-    query = text(
-        '''
-        WITH pipeline_stats AS (
-            SELECT
-                COUNT(*) AS total_runs,
-                COUNT(*) FILTER (WHERE status = 'SUCCESS') AS successful_runs
-            FROM pipeline_runs
-        ),
-        network_stats AS (
-            SELECT
-                COALESCE(
-                    AVG(
-                        CASE
-                            WHEN network_health = 'HEALTHY' THEN 100.0
-                            ELSE 0.0
-                        END
-                    ),
-                    0
-                ) AS healthy_percentage,
-                COALESCE(SUM(total_incidents), 0) AS total_alerts,
-                COALESCE(SUM(critical_incidents), 0) AS total_critical_alerts
-            FROM gold_network_intelligence
-        )
-        SELECT
-            CASE
-                WHEN ps.total_runs = 0 THEN 0
-                ELSE ROUND(
-                    ps.successful_runs * 100.0 / ps.total_runs,
-                    2
-                )
-            END AS pipeline_success_rate,
-            ROUND(ns.healthy_percentage, 2) AS healthy_percentage,
-            ns.total_alerts,
-            ns.total_critical_alerts
-        FROM pipeline_stats ps
-        CROSS JOIN network_stats ns
-        '''
-    )
-
-    with engine.connect() as connection:
-        return pd.read_sql(query, connection)
+    """Extracts macro-level pipeline success rates (cached for 60s) [INDEX]."""
+    return read_query("SELECT * FROM pipeline_kpis ORDER BY pipeline_name;", "pipeline_kpis")
 
 
+@st.cache_data(ttl=60)
 def get_current_health() -> pd.DataFrame:
-    '''
-    Return the current overall pipeline health.
-    '''
-    query = text(
-        '''
-        SELECT
-            CASE
-                WHEN pipeline_status = 'SUCCESS'
-                    THEN 'HEALTHY'
-                WHEN pipeline_status = 'RUNNING'
-                    THEN 'WARNING'
-                WHEN pipeline_status = 'FAILED'
-                    THEN 'CRITICAL'
-                ELSE 'UNKNOWN'
-            END AS overall_status,
-            pipeline_completed_at AS checked_at
-        FROM pipeline_operational_metrics
-        WHERE pipeline_name = :pipeline_name
-        ORDER BY run_id DESC
-        LIMIT 1
-        '''
-    )
-
-    with engine.connect() as connection:
-        return pd.read_sql(
-            query,
-            connection,
-            params={'pipeline_name': PIPELINE_NAME},
-        )
+    """Extracts the instantaneous real-time health snapshot state (cached for 60s) [INDEX]."""
+    return read_query("SELECT * FROM current_pipeline_health ORDER BY checked_at DESC;", "current_pipeline_health")
 
 
+@st.cache_data(ttl=60)
 def get_daily_health() -> pd.DataFrame:
-    '''
-    Return daily network health percentages from the Gold layer.
-    '''
-    query = text(
-        '''
-        SELECT
-            measurement_date AS health_date,
-            ROUND(
-                AVG(
-                    CASE
-                        WHEN network_health = 'HEALTHY'
-                            THEN 100.0
-                        ELSE 0.0
-                    END
-                ),
-                2
-            ) AS healthy_percentage
-        FROM gold_network_intelligence
-        GROUP BY measurement_date
-        ORDER BY measurement_date
-        '''
-    )
-
-    with engine.connect() as connection:
-        return pd.read_sql(query, connection)
+    """Extracts daily historical timeline availability percentage trends (cached for 60s) [INDEX]."""
+    return read_query("SELECT * FROM daily_pipeline_health ORDER BY health_date;", "daily_pipeline_health")
 
 
+@st.cache_data(ttl=60)
 def get_stage_summary() -> pd.DataFrame:
-    '''
-    Return the latest pipeline stage execution summary.
-    '''
-    query = text(
-        '''
+    """Extracts micro-stage SLA task execution metrics (cached for 60s) [INDEX]."""
+    return read_query("SELECT * FROM pipeline_stage_summary ORDER BY stage_name;", "pipeline_stage_summary")
+
+
+@st.cache_data(ttl=60)
+def get_site_performance(region=None, district=None, start_date=None, end_date=None) -> pd.DataFrame:
+    """Extracts cellular tower performance records matching dynamic filters securely [INDEX]."""
+    query = """
+        SELECT site_id, site_name, region, district, measurement_date, measurement_count,
+               avg_traffic_mb, avg_latency_ms, avg_packet_loss_pct, avg_signal_strength_dbm, avg_availability_pct
+        FROM gold_site_daily_performance WHERE 1 = 1
+    """
+    parameters = {}
+    if region:
+        query += " AND region = :region"
+        parameters["region"] = region
+    if district:
+        query += " AND district = :district"
+        parameters["district"] = district
+    if start_date:
+        query += " AND measurement_date >= :start_date"
+        parameters["start_date"] = start_date
+    if end_date:
+        query += " AND measurement_date <= :end_date"
+        parameters["end_date"] = end_date
+
+    query += " ORDER BY measurement_date DESC, site_id;"
+    return read_query(query, "site_performance", params=parameters)
+
+
+@st.cache_data(ttl=60)
+def get_network_summary(region=None, district=None, start_date=None, end_date=None) -> pd.DataFrame:
+    """Generates high-level network performance metric scores across your towers [INDEX]."""
+    query = """
+        SELECT COUNT(DISTINCT site_id) AS total_sites, SUM(measurement_count) AS total_measurements,
+               ROUND(AVG(avg_traffic_mb), 2) AS avg_traffic_mb, ROUND(AVG(avg_latency_ms), 2) AS avg_latency_ms,
+               ROUND(AVG(avg_packet_loss_pct), 2) AS avg_packet_loss_pct, ROUND(AVG(avg_availability_pct), 2) AS avg_availability_pct
+        FROM gold_site_daily_performance WHERE 1 = 1
+    """
+    parameters = {}
+    if region:
+        query += " AND region = :region"
+        parameters["region"] = region
+    if district:
+        query += " AND district = :district"
+        parameters["district"] = district
+    if start_date:
+        query += " AND measurement_date >= :start_date"
+        parameters["start_date"] = start_date
+    if end_date:
+        query += " AND measurement_date <= :end_date"
+        parameters["end_date"] = end_date
+
+    return read_query(query, "network_summary", params=parameters)
+def get_database_activity() -> pd.DataFrame:
+    """
+    Exposes high-resolution query tracking statistics straight out of PostgreSQL 
+    internal metadata catalogs to flag locking or long-running database requests [INDEX].
+    """
+    return read_query(
+        """
         SELECT
-            stage_name,
-            status,
-            records_read,
-            records_inserted,
-            records_rejected,
-            records_skipped,
-            duration_seconds,
-            started_at,
-            completed_at
-        FROM pipeline_stage_runs
-        WHERE run_id = (
-            SELECT MAX(run_id)
-            FROM pipeline_runs
-            WHERE pipeline_name = :pipeline_name
-        )
-        ORDER BY stage_run_id
-        '''
+            pid,
+            state,
+            query_start,
+            now() - query_start AS duration,
+            LEFT(query, 150) AS query
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND state <> 'idle'
+        ORDER BY query_start;
+        """,
+        query_name="database_activity",
     )
-
-    with engine.connect() as connection:
-        return pd.read_sql(
-            query,
-            connection,
-            params={'pipeline_name': PIPELINE_NAME},
-        )
-
-
-def get_site_performance(
-    region: Optional[str] = None,
-    district: Optional[str] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
-) -> pd.DataFrame:
-    '''
-    Return Gold site-level daily network performance.
-    '''
-    query = text(
-        '''
-        SELECT
-            site_id,
-            site_name,
-            region,
-            district,
-            measurement_date,
-            measurement_count,
-            avg_traffic_mb,
-            avg_latency_ms,
-            avg_packet_loss_pct,
-            avg_signal_strength_dbm,
-            avg_availability_pct,
-            updated_at
-        FROM gold_site_daily_performance
-        WHERE (CAST(:region AS VARCHAR) IS NULL
-               OR region = CAST(:region AS VARCHAR))
-          AND (CAST(:district AS VARCHAR) IS NULL
-               OR district = CAST(:district AS VARCHAR))
-          AND (CAST(:start_date AS DATE) IS NULL
-               OR measurement_date >= CAST(:start_date AS DATE))
-          AND (CAST(:end_date AS DATE) IS NULL
-               OR measurement_date <= CAST(:end_date AS DATE))
-        ORDER BY measurement_date, site_id
-        '''
-    )
-
-    params = {
-        'region': region,
-        'district': district,
-        'start_date': start_date,
-        'end_date': end_date,
-    }
-
-    with engine.connect() as connection:
-        return pd.read_sql(query, connection, params=params)
-
-
-def get_network_summary(
-    region: Optional[str] = None,
-    district: Optional[str] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
-) -> pd.DataFrame:
-    '''
-    Return aggregated network performance for the selected filters.
-    '''
-    query = text(
-        '''
-        SELECT
-            COUNT(DISTINCT site_id) AS total_sites,
-            COALESCE(SUM(measurement_count), 0) AS total_measurements,
-            ROUND(AVG(avg_traffic_mb), 2) AS avg_traffic_mb,
-            ROUND(AVG(avg_latency_ms), 2) AS avg_latency_ms,
-            ROUND(AVG(avg_packet_loss_pct), 2) AS avg_packet_loss_pct,
-            ROUND(AVG(avg_signal_strength_dbm), 2) AS avg_signal_strength_dbm,
-            ROUND(AVG(avg_availability_pct), 2) AS avg_availability_pct
-        FROM gold_site_daily_performance
-        WHERE (CAST(:region AS VARCHAR) IS NULL
-               OR region = CAST(:region AS VARCHAR))
-          AND (CAST(:district AS VARCHAR) IS NULL
-               OR district = CAST(:district AS VARCHAR))
-          AND (CAST(:start_date AS DATE) IS NULL
-               OR measurement_date >= CAST(:start_date AS DATE))
-          AND (CAST(:end_date AS DATE) IS NULL
-               OR measurement_date <= CAST(:end_date AS DATE))
-        '''
-    )
-
-    params = {
-        'region': region,
-        'district': district,
-        'start_date': start_date,
-        'end_date': end_date,
-    }
-
-    with engine.connect() as connection:
-        return pd.read_sql(query, connection, params=params)
