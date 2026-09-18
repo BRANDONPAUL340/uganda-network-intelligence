@@ -1,13 +1,15 @@
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
+
 import pandas as pd
 
 # ==============================================================================
 # 🌌 PROJECT PATHWAY RESOLUTION HOOK
-# Resolves ModuleNotFoundError by anchoring the repository root to sys.path [INDEX].
+# Resolves ModuleNotFoundError by anchoring the repository root to sys.path.
 # ==============================================================================
-root_dir = str(Path(__file__).resolve().parents)
+root_dir = str(Path(__file__).resolve().parents[2])
+
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
@@ -153,7 +155,7 @@ st.header("🟢 Current Pipeline Health")
 if current_health.empty:
     st.warning("No pipeline health data is available.")
 else:
-    health = current_health.iloc
+    health = current_health.iloc[0]
     status = health["overall_status"]
 
     if status == "HEALTHY":
@@ -177,13 +179,30 @@ st.header("📊 Executive Performance KPIs")
 if kpis.empty:
     st.info("No KPI data is available.")
 else:
-    kpi = kpis.iloc
+    # Get the first KPI row as a pandas Series
+    kpi = kpis.iloc[0]
+
     col1, col2, col3, col4 = st.columns(4)
 
-    col1.metric("Pipeline Success Rate", f"{kpi['pipeline_success_rate']:.2f}%")
-    col2.metric("Healthy Percentage", f"{kpi['healthy_percentage']:.2f}%")
-    col3.metric("Total System Alerts", int(kpi["total_alerts"]))
-    col4.metric("Critical System Alerts", int(kpi["total_critical_alerts"]))
+    col1.metric(
+        "Pipeline Success Rate",
+        f"{float(kpi['pipeline_success_rate']):.2f}%"
+    )
+
+    col2.metric(
+        "Healthy Percentage",
+        f"{float(kpi['healthy_percentage']):.2f}%"
+    )
+
+    col3.metric(
+        "Total System Alerts",
+        int(kpi["total_alerts"])
+    )
+
+    col4.metric(
+        "Critical System Alerts",
+        int(kpi["total_critical_alerts"])
+    )
 
 
 # ==============================================================================
@@ -192,22 +211,59 @@ else:
 st.markdown("---")
 st.header("📡 Network Performance Summary")
 
-if network_summary.empty or network_summary.iloc["total_sites"] is None:
-    st.warning("No network performance data matches the selected filter criteria.")
+if network_summary.empty:
+    st.warning(
+        "No network performance data matches the selected filter criteria."
+    )
 else:
-    summary = network_summary.iloc
+    # Get the first summary row as a pandas Series
+    summary = network_summary.iloc[0]
+
     col_kpi1, col_kpi2, col_kpi3, col_kpi4, col_kpi5 = st.columns(5)
 
-    col_kpi1.metric("Active Sites", int(summary["total_sites"] or 0))
-    col_kpi2.metric("Total Measurements", f"{int(summary['total_measurements'] or 0):,}")
-    col_kpi3.metric("Avg Traffic (MB)", f"{float(summary['avg_traffic_mb'] or 0.0):.2f}")
-    col_kpi4.metric("Avg Latency (ms)", f"{float(summary['avg_latency_ms'] or 0.0):.2f}")
-    col_kpi5.metric("Core Availability", f"{float(summary['avg_availability_pct'] or 0.0):.2f}%")
+    total_sites = summary["total_sites"]
+    total_measurements = summary["total_measurements"]
+    avg_traffic_mb = summary["avg_traffic_mb"]
+    avg_latency_ms = summary["avg_latency_ms"]
+    avg_availability_pct = summary["avg_availability_pct"]
+    avg_packet_loss_pct = summary["avg_packet_loss_pct"]
+
+    col_kpi1.metric(
+        "Active Sites",
+        int(total_sites) if pd.notna(total_sites) else 0
+    )
+
+    col_kpi2.metric(
+        "Total Measurements",
+        f"{int(total_measurements):,}" if pd.notna(total_measurements) else "0"
+    )
+
+    col_kpi3.metric(
+        "Avg Traffic (MB)",
+        f"{float(avg_traffic_mb):.2f}"
+        if pd.notna(avg_traffic_mb)
+        else "0.00"
+    )
+
+    col_kpi4.metric(
+        "Avg Latency (ms)",
+        f"{float(avg_latency_ms):.2f}"
+        if pd.notna(avg_latency_ms)
+        else "0.00"
+    )
+
+    col_kpi5.metric(
+        "Core Availability",
+        f"{float(avg_availability_pct):.2f}%"
+        if pd.notna(avg_availability_pct)
+        else "0.00%"
+    )
 
     st.metric(
         "Average Network Packet Loss",
-        f"{float(summary['avg_packet_loss_pct'] or 0.0):.2f}%",
-        delta=None
+        f"{float(avg_packet_loss_pct):.2f}%"
+        if pd.notna(avg_packet_loss_pct)
+        else "0.00%"
     )
 
 
