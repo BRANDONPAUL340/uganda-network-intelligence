@@ -33,3 +33,18 @@ def generate_alerts(report):
 
     logger.info(f"Alert parsing complete. Operational items triggered: {len(alerts)}")
     return alerts
+from dataclasses import dataclass
+
+
+@dataclass
+class Alert:
+    name: str
+    severity: str
+    message: str
+    triggered: bool = True
+
+
+def create_alert(name: str, severity: str, message: str) -> Alert:
+    """ Programmatic constructor utility to build unified system alerts [INDEX]. """
+    return Alert(name=name, severity=severity, message=message)
+

@@ -1,0 +1,222 @@
+[1mdiff --git a/src/monitoring/__init__.py b/src/monitoring/__init__.py[m
+[1mindex e80d9ee..892cf2b 100644[m
+[1m--- a/src/monitoring/__init__.py[m
+[1m+++ b/src/monitoring/__init__.py[m
+[36m@@ -1,4 +1,2 @@[m
+[31m-from src.monitoring.pipeline_metrics import PipelineMetrics[m
+[31m-from src.monitoring.pipeline_metrics import PipelineMetrics[m
+[31m-from src.monitoring.stage_monitoring import start_stage_run, finish_stage_run # ◄ Expose Stage Tracking[m
+[31m-from src.monitoring.lineage import record_lineage # ◄ Expose Data Lineage[m
+[32m+[m[32mfrom .pipeline_metrics import PipelineMetrics[m
+[32m+[m[32mfrom .stage_monitoring import start_stage_run, finish_stage_run[m
+\ No newline at end of file[m
+[1mdiff --git a/src/monitoring/alerts.py b/src/monitoring/alerts.py[m
+[1mindex 533481f..9f6e538 100644[m
+[1m--- a/src/monitoring/alerts.py[m
+[1m+++ b/src/monitoring/alerts.py[m
+[36m@@ -33,3 +33,18 @@[m [mdef generate_alerts(report):[m
+ [m
+     logger.info(f"Alert parsing complete. Operational items triggered: {len(alerts)}")[m
+     return alerts[m
+[32m+[m[32mfrom dataclasses import dataclass[m
+[32m+[m
+[32m+[m
+[32m+[m[32m@dataclass[m
+[32m+[m[32mclass Alert:[m
+[32m+[m[32m    name: str[m
+[32m+[m[32m    severity: str[m
+[32m+[m[32m    message: str[m
+[32m+[m[32m    triggered: bool = True[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef create_alert(name: str, severity: str, message: str) -> Alert:[m
+[32m+[m[32m    """ Programmatic constructor utility to build unified system alerts [INDEX]. """[m
+[32m+[m[32m    return Alert(name=name, severity=severity, message=message)[m
+[41m+[m
+[1mdiff --git a/src/monitoring/freshness.py b/src/monitoring/freshness.py[m
+[1mindex ba89bf5..6cf6ca4 100644[m
+[1m--- a/src/monitoring/freshness.py[m
+[1m+++ b/src/monitoring/freshness.py[m
+[36m@@ -1,26 +1,44 @@[m
+[31m-import sys[m
+[31m-from pathlib import Path[m
+[31m-[m
+[31m-# Dynamic project root path resolution hook[m
+[31m-root_dir = str(Path(__file__).resolve().parents[2])[m
+[31m-if root_dir not in sys.path:[m
+[31m-    sys.path.insert(0, root_dir)[m
+[31m-[m
+[32m+[m[32mfrom datetime import datetime, timezone[m
+ from sqlalchemy import text[m
+ from src.database import engine[m
+[32m+[m[32mfrom src.monitoring.alerts import Alert[m
+ [m
+ [m
+ def check_measurement_freshness():[m
+[32m+[m[32m    """Data Ingestion Lag Metric: Scans table files to find the maximum timestamp [INDEX]."""[m
+[32m+[m[32m    query = "SELECT MAX(measured_at) FROM measurements;"[m
+[32m+[m[32m    with engine.connect() as conn:[m
+[32m+[m[32m        return conn.execute(text(query)).scalar()[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef create_freshness_alert(latest_timestamp, max_age_seconds: float) -> Alert | None:[m
+     """[m
+[31m-    Data Ingestion Lag Metric: Scans the high-volume base telemetry table [m
+[31m-    to retrieve the maximum event timestamp [INDEX].[m
+[31m-    """[m
+[31m-    query = """[m
+[31m-    SELECT MAX(measured_at)[m
+[31m-    FROM measurements;[m
+[32m+[m[32m    Freshness Breach Detection: Compares the maximum data event timestamp against[m[41m [m
+[32m+[m[32m    current system clocks, alerting engineers if data updates drop behind schedule [INDEX].[m
+     """[m
+[32m+[m[32m    if latest_timestamp is None:[m
+[32m+[m[32m        return Alert([m
+[32m+[m[32m            name="data_freshness_unknown",[m
+[32m+[m[32m            severity="SEV2",[m
+[32m+[m[32m            message="No latest measurement timestamp was found inside database tables.",[m
+[32m+[m[32m        )[m
+ [m
+[31m-    with engine.connect() as conn:[m
+[31m-        result = conn.execute(text(query)).scalar()[m
+[32m+[m[32m    now = datetime.now(timezone.utc)[m
+[32m+[m
+[32m+[m[32m    # Force standard UTC timestamp validation rules to prevent timezone bugs[m
+[32m+[m[32m    if latest_timestamp.tzinfo is None:[m
+[32m+[m[32m        latest_timestamp = latest_timestamp.replace(tzinfo=timezone.utc)[m
+[32m+[m
+[32m+[m[32m    age = (now - latest_timestamp).total_seconds()[m
+[32m+[m
+[32m+[m[32m    if age > max_age_seconds:[m
+[32m+[m[32m        return Alert([m
+[32m+[m[32m            name="data_freshness_breach",[m
+[32m+[m[32m            severity="SEV3",[m
+[32m+[m[32m            message=([m
+[32m+[m[32m                f"Latest data is {age:.0f}s old; "[m
+[32m+[m[32m                f"maximum allowed age is {max_age_seconds:.0f}s"[m
+[32m+[m[32m            ),[m
+[32m+[m[32m        )[m
+ [m
+[31m-    return result[m
+[32m+[m[32m    return None[m
+[1mdiff --git a/src/monitoring/sla.py b/src/monitoring/sla.py[m
+[1mindex 1ffd12c..4ddc641 100644[m
+[1m--- a/src/monitoring/sla.py[m
+[1m+++ b/src/monitoring/sla.py[m
+[36m@@ -2,11 +2,30 @@[m [mPIPELINE_SLA_LIMIT_SECONDS = 60[m
+ FRESHNESS_SLA_LIMIT_HOURS = 1[m
+ [m
+ [m
+[32m+[m[32mfrom src.monitoring.alerts import Alert[m
+[32m+[m
+[32m+[m
+ def check_sla(runtime_seconds: float, limit_seconds: float) -> bool:[m
+[32m+[m[32m    """SLA Compliance Evaluator: Compares actual pipeline durations against limits."""[m
+[32m+[m[32m    return runtime_seconds <= limit_seconds[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef create_sla_alert(runtime_seconds: float, limit_seconds: float) -> Alert | None:[m
+     """[m
+[31m-    Return True when pipeline runtime is within the supplied SLA limit.[m
+[32m+[m[32m    SLA Breach Detection: Generates a SEV3 medium-alert notification[m[41m [m
+[32m+[m[32m    if a pipeline execution run breaches its performance threshold [INDEX].[m
+     """[m
+[31m-    return runtime_seconds <= limit_seconds[m
+[32m+[m[32m    if runtime_seconds > limit_seconds:[m
+[32m+[m[32m        return Alert([m
+[32m+[m[32m            name="pipeline_sla_breach",[m
+[32m+[m[32m            severity="SEV3",[m
+[32m+[m[32m            message=([m
+[32m+[m[32m                f"Pipeline runtime {runtime_seconds:.2f}s "[m
+[32m+[m[32m                f"exceeded SLA {limit_seconds:.2f}s"[m
+[32m+[m[32m            ),[m
+[32m+[m[32m        )[m
+[32m+[m
+[32m+[m[32m    return None[m
+ [m
+ [m
+ def evaluate_pipeline_sla(runtime_seconds: float | None) -> str:[m
+[1mdiff --git a/tests/test_alerts.py b/tests/test_alerts.py[m
+[1mindex b565755..0ce0dad 100644[m
+[1m--- a/tests/test_alerts.py[m
+[1m+++ b/tests/test_alerts.py[m
+[36m@@ -1,28 +1,51 @@[m
+[31m-from src.monitoring.alerts import generate_alerts[m
+[31m-[m
+[31m-[m
+[31m-def test_critical_alert_is_generated():[m
+[31m-    """ARRANGE, ACT & ASSERT: Verifies that a CRITICAL token generates an actionable payload map [INDEX]."""[m
+[31m-    report = {[m
+[31m-        "checks": {[m
+[31m-            "database": "HEALTHY",[m
+[31m-            "latest_pipeline_run": "CRITICAL",[m
+[31m-        }[m
+[31m-    }[m
+[31m-    alerts = generate_alerts(report)[m
+[31m-[m
+[31m-    assert len(alerts) == 1[m
+[31m-    assert alerts[0]["severity"] == "CRITICAL"[m
+[31m-    assert alerts[0]["check"] == "latest_pipeline_run"[m
+[31m-[m
+[31m-[m
+[31m-def test_healthy_report_has_no_alerts():[m
+[31m-    """ARRANGE, ACT & ASSERT: Verifies that a pure HEALTHY status maps cleanly to an empty alerts array [INDEX]."""[m
+[31m-    report = {[m
+[31m-        "checks": {[m
+[31m-            "database": "HEALTHY",[m
+[31m-            "latest_pipeline_run": "HEALTHY",[m
+[31m-        }[m
+[31m-    }[m
+[31m-    alerts = generate_alerts(report)[m
+[31m-    assert alerts == [][m
+[32m+[m[32mfrom src.monitoring.alerts import create_alert[m
+[32m+[m[32mfrom src.monitoring.pipeline_alerts import check_pipeline_status[m
+[32m+[m[32mfrom src.monitoring.sla import create_sla_alert[m
+[32m+[m[32mfrom src.monitoring.watermark_alerts import check_watermark[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef test_create_alert():[m
+[32m+[m[32m    """ARRANGE, ACT & ASSERT: Verifies the baseline alert object instantiates correctly."""[m
+[32m+[m[32m    alert = create_alert("test_alert", "SEV3", "Test message")[m
+[32m+[m[32m    assert alert.name == "test_alert"[m
+[32m+[m[32m    assert alert.severity == "SEV3"[m
+[32m+[m[32m    assert alert.triggered is True[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef test_failed_pipeline_creates_alert():[m
+[32m+[m[32m    """ARRANGE, ACT & ASSERT: Catches failure flags and triggers an alert."""[m
+[32m+[m[32m    alert = check_pipeline_status("FAILED")[m
+[32m+[m[32m    assert alert is not None[m
+[32m+[m[32m    assert alert.name == "pipeline_failure"[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef test_successful_pipeline_has_no_alert():[m
+[32m+[m[32m    """ARRANGE, ACT & ASSERT: Confirms that successful pipeline runs create no alerts."""[m
+[32m+[m[32m    alert = check_pipeline_status("SUCCESS")[m
+[32m+[m[32m    assert alert is None[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef test_sla_breach_creates_alert():[m
+[32m+[m[32m    """ARRANGE, ACT & ASSERT: Confirms that breaching SLA limits triggers an alert."""[m
+[32m+[m[32m    alert = create_sla_alert(120, 60)[m
+[32m+[m[32m    assert alert is not None[m
+[32m+[m[32m    assert alert.name == "pipeline_sla_breach"[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef test_sla_within_limit_has_no_alert():[m
+[32m+[m[32m    """ARRANGE, ACT & ASSERT: Confirms that runs finishing within limits create no alerts."""[m
+[32m+[m[32m    alert = create_sla_alert(30, 60)[m
+[32m+[m[32m    assert alert is None[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef test_watermark_regression_creates_alert():[m
+[32m+[m[32m    """ARRANGE, ACT & ASSERT: Confirms that high-watermark regression triggers an alert."""[m
+[32m+[m[32m    alert = check_watermark(40, 45)[m
+[32m+[m[32m    assert alert is not None[m
+[32m+[m[32m    assert alert.name == "watermark_regression"[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef test_watermark_progression_has_no_alert():[m
+[32m+[m[32m    """ARRANGE, ACT & ASSERT: Confirms that valid watermark forward progress creates no alerts."""[m
+[32m+[m[32m    alert = check_watermark(50, 45)[m
+[32m+[m[32m    assert alert is None[m

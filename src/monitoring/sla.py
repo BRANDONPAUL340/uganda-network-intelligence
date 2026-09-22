@@ -2,11 +2,30 @@ PIPELINE_SLA_LIMIT_SECONDS = 60
 FRESHNESS_SLA_LIMIT_HOURS = 1
 
 
+from src.monitoring.alerts import Alert
+
+
 def check_sla(runtime_seconds: float, limit_seconds: float) -> bool:
-    """
-    Return True when pipeline runtime is within the supplied SLA limit.
-    """
+    """SLA Compliance Evaluator: Compares actual pipeline durations against limits."""
     return runtime_seconds <= limit_seconds
+
+
+def create_sla_alert(runtime_seconds: float, limit_seconds: float) -> Alert | None:
+    """
+    SLA Breach Detection: Generates a SEV3 medium-alert notification 
+    if a pipeline execution run breaches its performance threshold [INDEX].
+    """
+    if runtime_seconds > limit_seconds:
+        return Alert(
+            name="pipeline_sla_breach",
+            severity="SEV3",
+            message=(
+                f"Pipeline runtime {runtime_seconds:.2f}s "
+                f"exceeded SLA {limit_seconds:.2f}s"
+            ),
+        )
+
+    return None
 
 
 def evaluate_pipeline_sla(runtime_seconds: float | None) -> str:

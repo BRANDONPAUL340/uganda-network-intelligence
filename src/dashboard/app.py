@@ -1,15 +1,13 @@
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
-
 import pandas as pd
 
 # ==============================================================================
 # 🌌 PROJECT PATHWAY RESOLUTION HOOK
-# Resolves ModuleNotFoundError by anchoring the repository root to sys.path.
+# Resolves ModuleNotFoundError by anchoring the repository root to sys.path [INDEX].
 # ==============================================================================
-root_dir = str(Path(__file__).resolve().parents[2])
-
+root_dir = str(Path(__file__).resolve().parents)
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
@@ -19,6 +17,12 @@ import streamlit as st
 from src.config import PIPELINE_NAME
 from src.dashboard.health import check_dashboard_database
 from src.dashboard.version import DASHBOARD_VERSION
+from src.dashboard.monitoring import (
+    get_open_alerts,
+    get_recent_alerts,
+    get_alert_summary_by_severity,
+    get_alert_summary_by_status,
+)
 from src.dashboard.data import (
     check_database_connection,
     get_current_health,
@@ -30,14 +34,13 @@ from src.dashboard.data import (
     get_stage_summary,
 )
 
-# 1. Page Presentation Setup
+# Page Layout Configurations
 st.set_page_config(
     page_title="Uganda Network & Service Intelligence",
     page_icon="📡",
     layout="wide",
 )
 
-# 12. Add a persistent rendering timezone stamp token
 dashboard_checked_at = datetime.now(timezone.utc)
 
 st.title("📡 Uganda Network & Service Intelligence")
@@ -65,7 +68,6 @@ if not check_database_connection():
 # ==============================================================================
 st.sidebar.header("Dashboard Filters")
 
-# Execute live application-tier heartbeat telemetry pass [INDEX]
 dashboard_health = check_dashboard_database()
 
 if dashboard_health["status"] == "HEALTHY":
@@ -75,7 +77,6 @@ elif dashboard_health["status"] == "WARNING":
 else:
     st.sidebar.error("Database: Critical")
 
-# 13. Expose application deployment build footprints
 st.sidebar.caption(f"Dashboard version: {DASHBOARD_VERSION}")
 
 try:
@@ -130,6 +131,11 @@ try:
     daily_health = get_daily_health()
     stage_summary = get_stage_summary()
     
+    # Ingest incident monitoring modules data [INDEX]
+    open_alerts = get_open_alerts()
+    recent_alerts = get_recent_alerts()
+    severity_summary = get_alert_summary_by_severity()
+    
     network_summary = get_network_summary(
         region=region_filter,
         district=district_filter,
@@ -148,187 +154,95 @@ except Exception as exc:
 
 
 # ==============================================================================
-# 🟢 CONTAINER SECTION 1: Current Pipeline Health Banner
-# ==============================================================================
-st.header("🟢 Current Pipeline Health")
+# 🚨 OPERATIONS & MONITORING SECTION (Day 115 Core Architecture Feature Block)
+# =============================================================================
+st.header("🚨 Operations & Monitoring Center")
 
-if current_health.empty:
-    st.warning("No pipeline health data is available.")
-else:
-    health = current_health.iloc[0]
-    status = health["overall_status"]
+# 6. Add dynamic monitoring KPIs pulled natively out of PostgreSQL logs [INDEX]
+total_open_count = len(open_alerts) if not open_alerts.empty else 0
 
-    if status == "HEALTHY":
-        st.success(f"Overall Status: **{status}**")
-    elif status == "WARNING":
-        st.warning(f"Overall Status: **{status}**")
-    elif status == "CRITICAL":
-        st.error(f"Overall Status: **{status}**")
+sev2_count = 0
+sev3_count = 0
+if not severity_summary.empty:
+    sev_mapping = dict(zip(severity_summary["severity"], severity_summary["alert_count"]))
+    sev2_count = sev_mapping.get("SEV2", 0)
+    sev3_count = sev_mapping.get("SEV3", 0)
+
+pipeline_latest_status = "UNKNOWN"
+if not current_health.empty:
+    pipeline_latest_status = current_health.iloc[0]["overall_status"]
+
+col_alert1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
+with col_alert1:
+    if total_open_count > 0:
+        st.metric("🚨 Active Open Alerts", total_open_count, delta="- Actions Required", delta_color="inverse")
     else:
-        st.info(f"Overall Status: **{status}**")
+        st.metric("🚨 Active Open Alerts", total_open_count)
+with col_kpi2:
+    st.metric("🟡 Active SEV2 Alerts", int(sev2_count))
+with col_kpi3:
+    st.metric("🔵 Active SEV3 Alerts", int(sev3_count))
+with col_kpi4:
+    if pipeline_latest_status == "HEALTHY":
+        st.metric("📡 Pipeline Status", pipeline_latest_status, delta="⚡ Normal")
+    else:
+        st.metric("📡 Pipeline Status", pipeline_latest_status, delta="⚠️ Anomaly Detected", delta_color="inverse")
 
-    st.caption(f"Last checked: {health['checked_at']}")
-
-
-# ==============================================================================
-# 📊 CONTAINER SECTION 2: Macro Platform Performance KPIs
-# ==============================================================================
+# 7. Layout Breakdown Containers
 st.markdown("---")
-st.header("📊 Executive Performance KPIs")
+col_mon_left, col_mon_right = st.columns([3, 2])
 
-if kpis.empty:
-    st.info("No KPI data is available.")
-else:
-    # Get the first KPI row as a pandas Series
-    kpi = kpis.iloc[0]
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    col1.metric(
-        "Pipeline Success Rate",
-        f"{float(kpi['pipeline_success_rate']):.2f}%"
-    )
-
-    col2.metric(
-        "Healthy Percentage",
-        f"{float(kpi['healthy_percentage']):.2f}%"
-    )
-
-    col3.metric(
-        "Total System Alerts",
-        int(kpi["total_alerts"])
-    )
-
-    col4.metric(
-        "Critical System Alerts",
-        int(kpi["total_critical_alerts"])
-    )
-
-
-# ==============================================================================
-# 📊 CONTAINER SECTION 3: Network Performance Summary Row
-# ==============================================================================
-st.markdown("---")
-st.header("📡 Network Performance Summary")
-
-if network_summary.empty:
-    st.warning(
-        "No network performance data matches the selected filter criteria."
-    )
-else:
-    # Get the first summary row as a pandas Series
-    summary = network_summary.iloc[0]
-
-    col_kpi1, col_kpi2, col_kpi3, col_kpi4, col_kpi5 = st.columns(5)
-
-    total_sites = summary["total_sites"]
-    total_measurements = summary["total_measurements"]
-    avg_traffic_mb = summary["avg_traffic_mb"]
-    avg_latency_ms = summary["avg_latency_ms"]
-    avg_availability_pct = summary["avg_availability_pct"]
-    avg_packet_loss_pct = summary["avg_packet_loss_pct"]
-
-    col_kpi1.metric(
-        "Active Sites",
-        int(total_sites) if pd.notna(total_sites) else 0
-    )
-
-    col_kpi2.metric(
-        "Total Measurements",
-        f"{int(total_measurements):,}" if pd.notna(total_measurements) else "0"
-    )
-
-    col_kpi3.metric(
-        "Avg Traffic (MB)",
-        f"{float(avg_traffic_mb):.2f}"
-        if pd.notna(avg_traffic_mb)
-        else "0.00"
-    )
-
-    col_kpi4.metric(
-        "Avg Latency (ms)",
-        f"{float(avg_latency_ms):.2f}"
-        if pd.notna(avg_latency_ms)
-        else "0.00"
-    )
-
-    col_kpi5.metric(
-        "Core Availability",
-        f"{float(avg_availability_pct):.2f}%"
-        if pd.notna(avg_availability_pct)
-        else "0.00%"
-    )
-
-    st.metric(
-        "Average Network Packet Loss",
-        f"{float(avg_packet_loss_pct):.2f}%"
-        if pd.notna(avg_packet_loss_pct)
-        else "0.00%"
-    )
-
-
-# ==============================================================================
-# 📈 CONTAINER SECTION 4: Network Trends Visual Analytics
-# ==============================================================================
-st.markdown("---")
-if not site_performance.empty:
-    st.header("📈 Network Performance & Trend Analytics")
-    col_chart1, col_chart2 = st.columns(2)
-
-    with col_chart1:
-        site_chart_data = (
-            site_performance
-            .groupby("site_name", as_index=False)["avg_availability_pct"]
-            .mean()
-            .sort_values("avg_availability_pct")
+with col_mon_left:
+    # 8. Display Open Active Incidents Table Grid with high visibility
+    st.subheader("⚠️ Active Open Incidents")
+    if open_alerts.empty:
+        st.success("🎉 **System Clean:** Absolute zero unresolved platform anomalies found on disk.")
+    else:
+        # 10. Perform high-resolution python presentation age calculations [INDEX]
+        # Ensure triggered_at series handles timezone conversion safely to prevent math bugs
+        open_alerts["triggered_at"] = pd.to_datetime(open_alerts["triggered_at"])
+        now_ts = datetime.now(timezone.utc)
+        
+        ages_formatted = []
+        for idx, row in open_alerts.iterrows():
+            trig_time = row["triggered_at"]
+            if trig_time.tzinfo is None:
+                trig_time = trig_time.replace(tzinfo=timezone.utc)
+            else:
+                trig_time = trig_time.tz_convert(timezone.utc)
+                
+            delta = now_ts - trig_time
+            tot_min = int(delta.total_seconds() // 60)
+            if tot_min >= 60:
+                hours = tot_min // 60
+                mins = tot_min % 60
+                ages_formatted.append(f"{hours}h {mins}m")
+            else:
+                ages_formatted.append(f"{tot_min}m")
+                
+        open_alerts["Open for"] = ages_formatted
+        
+        # Display polished incident panel to engineers [INDEX]
+        st.dataframe(
+            open_alerts[["severity", "alert_name", "message", "Open for", "triggered_at"]],
+            use_container_width=True,
+            hide_index=True
         )
-        fig_avail = px.bar(
-            site_chart_data,
-            x="avg_availability_pct",
-            y="site_name",
-            orientation="h",
-            title="Average Site Availability (%)",
-            labels={"avg_availability_pct": "Availability (%)", "site_name": "Site Name"},
+
+with col_mon_right:
+    # 9. Recent Alert History Log Table (Audit trail mapping) [INDEX]
+    st.subheader("📚 Recent Alert History Logs")
+    if recent_alerts.empty:
+        st.info("No historical alerts registered inside audit table ledgers.")
+    else:
+        st.dataframe(
+            recent_alerts[["alert_name", "severity", "status", "triggered_at"]],
+            use_container_width=True,
+            hide_index=True
         )
-        st.plotly_chart(fig_avail, use_container_width=True)
 
-    with col_chart2:
-        latency_data = (
-            site_performance
-            .groupby("site_name", as_index=False)["avg_latency_ms"]
-            .mean()
-            .sort_values("avg_latency_ms", ascending=False)
-        )
-        fig_lat = px.bar(
-            latency_data,
-            x="site_name",
-            y="avg_latency_ms",
-            title="Average Latency by Site (ms)",
-            labels={"avg_latency_ms": "Latency (ms)", "site_name": "Site Name"},
-        )
-        st.plotly_chart(fig_lat, use_container_width=True)
-
-    traffic_trend = (
-        site_performance
-        .groupby("measurement_date", as_index=False)["avg_traffic_mb"]
-        .mean()
-    )
-    fig_traffic = px.line(
-        traffic_trend,
-        x="measurement_date",
-        y="avg_traffic_mb",
-        markers=True,
-        title="Average Network Traffic Over Time (MB)",
-        labels={"measurement_date": "Timeline Date", "avg_traffic_mb": "Traffic Volume (MB)"},
-    )
-    st.plotly_chart(fig_traffic, use_container_width=True)
-
-
-# ==============================================================================
-# 🩺 CONTAINER SECTION 5: Pipeline Health Timeline & Distribution
-# ==============================================================================
-st.markdown("---")
-st.header("🩺 Pipeline Health History Profiles")
+# Pipeline Platform Ingestion Health Trend Sub-container
+st.subheader("📈 Pipeline Availability Statistics")
 col_trend_left, col_trend_right = st.columns(2)
 
 with col_trend_left:
@@ -365,4 +279,14 @@ with col_trend_right:
             health_counts,
             names="status",
             values="count",
+            title="Pipeline Health State Distribution Share",
         )
+        st.plotly_chart(fig_pie, use_container_width=True)
+
+# 12. Add a performance-safe 30-second interface auto-refresh loop fence [1]
+import time
+st.sidebar.markdown("---")
+if st.sidebar.checkbox("🔄 Enable Auto-Refresh (30s)", value=True):
+    time.sleep(0.5)  # Safe GUI thread breathing room
+    st.fragment(st.rerun)()  # Triggers a safe layout reload loop fence
+
