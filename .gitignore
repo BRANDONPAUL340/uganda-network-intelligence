@@ -26,3 +26,7 @@ logs/
 # 🔓 Explicitly whitelist safe configuration template blueprints
 !.env.example
 !.env.test.example
+# Database backups and recovery dumps
+backups/
+*.sql
+*.dump

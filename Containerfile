@@ -23,9 +23,15 @@ COPY README.md .
 RUN useradd --create-home --shell /bin/bash appuser \
     && chown -R appuser:appuser /app
 
+# (Keep all of your slim base images, pip packages, and unprivileged user mappings intact)
+
 USER appuser
 
 EXPOSE 8501
 
-# Run Streamlit bound across all network interfaces on port 8501
+# 🧠 Embedded Container Health Layer
+# Podman will periodically execute this abstract check loop within the isolated network namespace [1]
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD python -m src.dashboard.healthcheck
+
 CMD ["streamlit", "run", "src/dashboard/app.py", "--server.address=0.0.0.0", "--server.port=8501"]

@@ -42,3 +42,20 @@ def get_dashboard_health() -> dict:
         "application": "HEALTHY",
         "database": database["status"],
     }
+import os
+from sqlalchemy import text
+from src.database import engine
+from src.dashboard.version import DASHBOARD_VERSION
+
+# ... (keep your existing check_dashboard_database and get_dashboard_health functions intact)
+
+def get_deployment_info() -> dict:
+    """
+    Deployment Metadata Tracker: Resolves the active application build 
+    version string and environment parameters at runtime [INDEX].
+    """
+    return {
+        "version": DASHBOARD_VERSION,
+        "environment": os.getenv("ENVIRONMENT", "development"),
+    }
+

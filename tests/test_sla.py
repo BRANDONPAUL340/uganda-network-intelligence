@@ -39,3 +39,16 @@ def test_freshness_breaches():
 def test_freshness_unknown():
     """ARRANGE, ACT & ASSERT: Verifies missing values mark as UNKNOWN."""
     assert evaluate_freshness(None) == "UNKNOWN"
+
+from src.monitoring.sla import check_sla
+
+
+def test_sla_pass():
+    """ARRANGE, ACT & ASSERT: Asserts true when actual duration falls well under the SLA ceiling [1]."""
+    assert check_sla(20, 60) is True
+
+
+def test_sla_fail():
+    """ARRANGE, ACT & ASSERT: Asserts false when actual duration breaches the SLA performance ceiling [1]."""
+    assert check_sla(120, 60) is False
+

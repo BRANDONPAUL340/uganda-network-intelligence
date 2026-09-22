@@ -1,32 +1,43 @@
-from src.config import (
-    MAX_DATA_FRESHNESS_DAYS,
-    PIPELINE_SLA_SECONDS,
-)
+PIPELINE_SLA_LIMIT_SECONDS = 60
+FRESHNESS_SLA_LIMIT_HOURS = 1
 
 
-def evaluate_pipeline_sla(duration_seconds):
+def check_sla(runtime_seconds: float, limit_seconds: float) -> bool:
     """
-    Programmatically determines if a completed pipeline execution
-    run complied with or breached our duration target boundaries.
+    Return True when pipeline runtime is within the supplied SLA limit.
     """
-    if duration_seconds is None:
+    return runtime_seconds <= limit_seconds
+
+
+def evaluate_pipeline_sla(runtime_seconds: float | None) -> str:
+    """
+    Evaluate pipeline runtime against the 60-second SLA.
+
+    Returns:
+        PASS: Runtime is within the SLA.
+        BREACH: Runtime exceeds the SLA.
+        UNKNOWN: Runtime is missing.
+    """
+    if runtime_seconds is None:
         return "UNKNOWN"
 
-    if duration_seconds <= PIPELINE_SLA_SECONDS:
-        return "PASS"
+    return (
+        "PASS"
+        if check_sla(runtime_seconds, PIPELINE_SLA_LIMIT_SECONDS)
+        else "BREACH"
+    )
 
-    return "BREACH"
 
-
-def evaluate_freshness(freshness_days):
+def evaluate_freshness(lag_hours: float | None) -> str:
     """
-    Programmatically determines if the inbound staging data freshness
-    falls within our required operational SLA timeline constraints.
+    Evaluate data freshness against the 1-hour freshness SLA.
+
+    Returns:
+        PASS: Data lag is within the freshness SLA.
+        BREACH: Data lag exceeds the freshness SLA.
+        UNKNOWN: Lag value is missing.
     """
-    if freshness_days is None:
+    if lag_hours is None:
         return "UNKNOWN"
 
-    if freshness_days <= MAX_DATA_FRESHNESS_DAYS:
-        return "PASS"
-
-    return "BREACH"
+    return "PASS" if lag_hours <= FRESHNESS_SLA_LIMIT_HOURS else "BREACH"

@@ -66,8 +66,9 @@ services:
       PYTHONPATH: /app
     ports:
       - "8501:8501"
+    volumes:
+      - ./src:/app/src
     restart: unless-stopped
-
 volumes:
   uganda-network-intelligence_postgres18_data:
     external: true
