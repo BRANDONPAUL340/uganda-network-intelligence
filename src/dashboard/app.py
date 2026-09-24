@@ -377,17 +377,37 @@ if not failed_steps_df.empty:
     st.markdown("### ❌ Fine-Grained Sub-Task Failures")
     st.dataframe(failed_steps_df, use_container_width=True, hide_index=True)
 # ==============================================================================
-# 📊 STEP PERFORMANCE VISUAL ANALYTICS (Day 124 Core Charting Blocks)
+# 🚨 SYSTEM OPERATIONS, OBSERVABILITY & INCIDENT DISPATCH NODE
 # ==============================================================================
-from src.dashboard.monitoring import get_step_durations
+import pandas as pd
+import streamlit as st
 
-try:
-    step_data_df = get_step_durations()
-except Exception as exc:
-    st.error(f"Unable to load active stage execution metrics logs: {exc}")
-    st.stop()
+# Centralized data access layer module imports
+from src.dashboard.monitoring import (
+    get_available_runs,
+    get_failed_steps,
+    get_last_successful_run,
+    get_run_details,
+    get_run_step_durations,
+    get_run_steps,
+    get_step_durations,
+)
 
 st.markdown("---")
+st.header("🚨 Pipeline Operations & Performance Analytics")
+
+# 🛠️ 1. DATA EXTRACTION & SYNCHRONIZATION OVERVIEW
+try:
+    step_data_df = get_step_durations()
+    last_success_df = get_last_successful_run()
+    failed_steps_df = get_failed_steps()
+    available_runs_df = get_available_runs()
+except Exception as exc:
+    st.error(f"Unable to synchronize system observability metrics data: {exc}")
+    st.stop()
+
+
+# ⏱️ 2. HISTORICAL STAGE PERFORMANCE TIER
 st.subheader("⏱️ Micro-Stage Task Performance Analytics")
 
 if step_data_df.empty:
@@ -396,7 +416,6 @@ else:
     col_chart_left, col_chart_right = st.columns(2)
     
     with col_chart_left:
-        # 11. Display polished, correct tabular data grid first for full engineering audits [INDEX]
         st.markdown("**Granular Task Execution Records**")
         st.dataframe(
             step_data_df[["run_id", "step_name", "status", "records_processed", "duration_seconds"]],
@@ -405,41 +424,26 @@ else:
         )
         
     with col_chart_right:
-        # 12. Display clean, aggregated average duration charts [INDEX]
         st.markdown("**Historical Average Stage Runtimes (Seconds)**")
-        
-        # Calculate mean execution lengths grouped strictly by step names [INDEX]
         avg_durations = (
             step_data_df.groupby("step_name")["duration_seconds"]
             .mean()
             .reset_index()
             .sort_values(by="duration_seconds", ascending=False)
         )
-        
-        # Render high-visibility bar graph without clunky visualization bloat [INDEX]
         st.bar_chart(
             data=avg_durations,
             x="step_name",
             y="duration_seconds",
             use_container_width=True
         )
-# ==============================================================================
-# 🕐 HIGH-WATERMARK EXECUTIONS & CONDITIONAL FAILURE DRILL-DOWNS (Day 124 Final)
-# ==============================================================================
-from src.dashboard.monitoring import get_last_successful_run, get_failed_steps
 
-try:
-    last_success_df = get_last_successful_run()
-    failed_steps_df = get_failed_steps()
-except Exception as exc:
-    st.error(f"Unable to load active high-watermark analytics: {exc}")
-    st.stop()
 
+# 🕐 3. OPERATIONAL BASHARES & GLOBAL SYSTEM ERROR AUDITS
 st.markdown("---")
 col_obs_left, col_obs_right = st.columns(2)
 
 with col_obs_left:
-    # 13. Render the Last Successful Run status card panel
     st.subheader("🕐 Last Successful Run Baseline")
     if last_success_df.empty:
         st.info("No successful ingestion batch runs registered inside historical catalogs.")
@@ -451,10 +455,8 @@ with col_obs_left:
         )
 
 with col_obs_right:
-    # 14 & 15. Render Data-Responsive Failure Grids handling empty states gracefully
     st.subheader("⚠️ Failed Pipeline Steps Log")
     if failed_steps_df.empty:
-        # Better UI Pattern: Clear success notification when zero rows match [INDEX]
         st.success("✅ **System Clean:** No failed pipeline sub-stage steps found on disk.")
     else:
         st.warning(f"🚨 **{len(failed_steps_df)} Faulty Sub-Task Executions Flagged!**")
@@ -463,3 +465,83 @@ with col_obs_right:
             use_container_width=True,
             hide_index=True
         )
+
+
+# 🕵️‍♂️ 4. INTERACTIVE INCIDENT TRACEABILITY ROOM
+st.markdown("---")
+st.header("🕵️‍♂️ Granular Ingestion Run Traceability Engine")
+
+if available_runs_df.empty:
+    st.info("No active pipeline execution logs found on disk to investigate.")
+else:
+    run_ids = available_runs_df["run_id"].tolist()
+    selected_run_id = st.selectbox(
+        "🔎 Choose an Execution Run ID to trace sub-stage operational data frames:",
+        options=run_ids,
+        index=0
+    )
+    
+    if selected_run_id:
+        run_details_df = get_run_details(selected_run_id)
+        
+        if not run_details_df.empty:
+            run_row = run_details_df.iloc[0]
+            
+            st.markdown(f"#### 📊 Execution Context Summary — Run #{selected_run_id}")
+            col_id, col_stat, col_rec = st.columns(3)
+            with col_id:
+                st.metric("Run ID Target", f"#{selected_run_id}")
+            with col_stat:
+                st.metric("Batch Execution Status", str(run_row["status"]))
+            with col_rec:
+                st.metric("Total Records Ingested", f"{int(run_row['records_processed'] or 0):,}")
+            
+            # Extract and display steps parameterised by selection
+            with st.spinner(f"Querying sub-stage tables for Run #{selected_run_id}..."):
+                steps_df = get_run_steps(selected_run_id)
+                duration_df = get_run_step_durations(selected_run_id)
+                
+            st.markdown(f"##### ⏱️ Sub-Stage Step Telemetry Matrix — Run #{selected_run_id}")
+            if steps_df.empty:
+                st.info("ℹ️ No granular micro-stage tasks registered for this specific run ID yet.")
+            else:
+                st.dataframe(
+                    steps_df[["step_id", "step_name", "status", "records_processed", "started_at", "completed_at"]],
+                    use_container_width=True,
+                    hide_index=True
+                )
+                
+                # Render specific sub-stage errors inline
+                for _, step in steps_df.iterrows():
+                    if step["status"] == "FAILED" and step["error_message"]:
+                        st.error(f"❌ **Crash Trace in Step '{step['step_name']}':** {step['error_message']}")
+
+            # Render global execution errors conditionally
+            if str(run_row["status"]) == "FAILED" and pd.notna(run_row.get("error_message")):
+                st.error(f"🚨 **Global Pipeline Failure Traceback:** {run_row['error_message']}")
+
+            # Render high-resolution chronological flow map timeline
+            st.markdown(f"##### ⏳ Chronological Execution Timeline Flow — Run #{selected_run_id}")
+            if duration_df.empty:
+                st.info("No completed micro-stage logs found to plot chronological traces.")
+            else:
+                timeline_items = []
+                for _, step in duration_df.iterrows():
+                    st_time = str(step["started_at"])[11:19]
+                    dur_sec = float(step["duration_seconds"] or 0)
+                    status_icon = "✅" if step["status"] == "SUCCESS" else "❌"
+                    timeline_items.append(
+                        f"⏱️ `{st_time}` ──► **{step['step_name'].upper()}** "
+                        f"[{status_icon} {step['status']}] ── Processing: `{step['records_processed']}` rows "
+                        f"— Duration: `{dur_sec:.2f}s`"
+                    )
+                st.markdown("\n\n".join(timeline_items))
+                
+                with st.expander("Expose Raw Time Interval Parameters Mapping"):
+                    st.dataframe(
+                        duration_df[["step_name", "status", "records_processed", "duration"]],
+                        use_container_width=True,
+                        hide_index=True
+                    )
+        else:
+            st.error("Unable to extract details for the selected run token.")

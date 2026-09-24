@@ -278,4 +278,65 @@ def get_last_successful_run() -> pd.DataFrame:
         LIMIT 1;
     """
     return read_query(query, "get_last_successful_run")
+@st.cache_data(ttl=15)
+def get_available_runs() -> pd.DataFrame:
+    """
+    4. Available Run Selection Query: Retrieves the complete structural index 
+    of historical runs from pipeline_runs to drive dropdown filter select lists [INDEX].
+    """
+    query = """
+        SELECT run_id, pipeline_name, status, started_at, completed_at
+        FROM pipeline_runs
+        ORDER BY run_id DESC;
+    """
+    return read_query(query, "get_available_runs")
 
+@st.cache_data(ttl=15)
+def get_run_steps(run_id: int) -> pd.DataFrame:
+    """
+    7. Parameterized Sub-Stage Finder: Retrieves granular task execution logs
+    filtered exclusively by the operator's chosen Parent Run ID [INDEX].
+    """
+    query = """
+        SELECT step_id, run_id, step_name, status, records_processed, 
+               started_at, completed_at, error_message
+        FROM pipeline_steps
+        WHERE run_id = :run_id
+        ORDER BY step_id ASC;
+    """
+    return read_query(query, "get_run_steps", params={"run_id": run_id})
+
+
+@st.cache_data(ttl=15)
+def get_run_details(run_id: int) -> pd.DataFrame:
+    """
+    10. Parameterized Run Details Loader: Retrieves top-level batch metadata
+    for a single selected run execution context [INDEX].
+    """
+    query = """
+        SELECT run_id, pipeline_name, status, started_at, completed_at, 
+               records_processed, error_message
+        FROM pipeline_runs
+        WHERE run_id = :run_id;
+    """
+    return read_query(query, "get_run_details", params={"run_id": run_id})
+@st.cache_data(ttl=15)
+def get_run_step_durations(run_id: int) -> pd.DataFrame:
+    """
+    14. Run Step Duration Tracker: Extracts explicit runtime execution intervals 
+    and row counts chronologically for a targeted parent execution run [INDEX].
+    """
+    query = """
+        SELECT
+            step_name,
+            status,
+            records_processed,
+            completed_at - started_at AS duration,
+            EXTRACT(EPOCH FROM (completed_at - started_at)) AS duration_seconds,
+            started_at,
+            completed_at
+        FROM pipeline_steps
+        WHERE run_id = :run_id AND completed_at IS NOT NULL
+        ORDER BY step_id ASC;
+    """
+    return read_query(query, "get_run_step_durations", params={"run_id": run_id})
