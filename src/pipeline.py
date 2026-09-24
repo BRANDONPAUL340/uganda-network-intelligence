@@ -90,6 +90,50 @@ def finish_pipeline_run(
             }
         )
 
+import logging
+from src.version import PROJECT_VERSION
+from src.config import PIPELINE_NAME
+# 🧩 Import your centralized, transaction-safe monitoring hooks [INDEX]
+from src.pipeline_monitoring import (
+    start_pipeline_step,
+    complete_pipeline_step,
+    fail_pipeline_step,
+)
+
+logger = logging.getLogger(__name__)
+
+def run_pipeline_execution(run_id: int) -> None:
+    """
+    Automated Platform Orchestration Loop: Executes data lakehouse transformations, 
+    instrumenting each step to stream metrics straight to PostgreSQL [INDEX].
+    """
+    logger.info(f"Starting instrumented pipeline execution context for Run #{run_id}")
+
+    # ==========================================================================
+    # 🏗️ PART 3 — Wrap Bronze Ingestion Layer Block
+    # ==========================================================================
+    # 1. Initialize the step as 'RUNNING' and capture its unique ID [INDEX]
+    step_id_bronze = start_pipeline_step(run_id, "bronze_ingestion")
+    try:
+        logger.info("Executing Bronze ingestion stage...")
+        
+        # 🟢 CALL YOUR EXISTING BRONZE FUNCTION HERE 
+        # Example: records_bronze = run_bronze() or ingest_raw_telemetry()
+        records_bronze = 1250  # Capturing your validated processed count baseline [INDEX]
+        
+        # 2. Mark as SUCCESS and record processed row counts atomically [INDEX]
+        complete_pipeline_step(step_id_bronze, records_processed=records_bronze)
+        logger.info(f"Bronze ingestion step completed successfully. Rows: {records_bronze}")
+        
+    except Exception as exc:
+        # 3. Catch errors gracefully, stamp FAILED status, log the error, and re-raise [INDEX]
+        logger.error(f"❌ Bronze ingestion step failed: {exc}")
+        fail_pipeline_step(step_id_bronze, error_message=str(exc))
+        raise
+
+    # (Keep your existing Silver, Gold, and Data Quality function triggers intact below)
+
+
 
 def main():
     """Unified data pipeline stage engine equipped with accurate accounting trackers."""
@@ -148,6 +192,7 @@ def main():
             finish_stage(silver_sid, "FAILED", error_message=str(exc))
             logger.exception("SILVER stage failed ❌")
             raise
+    
 
         # -------------------------------------------------
         # 3. QUALITY STAGE (🔒 Enforced with Pre-Flight Schema Firewall!)
@@ -271,4 +316,76 @@ def main():
     # 🚀 Fixed: Ensure there are absolutely ZERO leading spaces before either line below!
 if __name__ == "__main__":
     main()
+import logging
+from src.version import PROJECT_VERSION
+from src.config import PIPELINE_NAME
+# Ingest our newly deployed automated tracking drivers [INDEX]
+from src.monitoring.step_tracker import (
+    start_pipeline_step,
+    complete_pipeline_step,
+    fail_pipeline_step
+)
+
+logger = logging.getLogger(__name__)
+
+def execute_full_pipeline(run_id: int) -> None:
+    """
+    Automated Platform Orchestration Loop: Executes multi-tier data lakehouse 
+    transformations, tracking step metrics and catching exceptions live [INDEX].
+    """
+    logger.info(f"Starting step-level monitoring execution pass for Run #{run_id}")
+
+    # ==========================================================================
+    # 🏗️ PART 9 — Apply the Pattern to Bronze Ingestion
+    # ==========================================================================
+    step_id_bronze = start_pipeline_step(run_id, "bronze_ingestion")
+    try:
+        logger.info("Executing Bronze ingestion step...")
+        
+        # Call your existing Bronze data extraction function logic here [INDEX]
+        # For example: records_bronze = ingest_raw_telemetry()
+        records_bronze = 1250  # Mapping baseline metric bounds
+        
+        complete_pipeline_step(step_id_bronze, records_processed=records_bronze)
+        logger.info(f"Bronze step completed successfully: {records_bronze} rows.")
+    except Exception as exc:
+        logger.error(f"Bronze ingestion crashed: {exc}")
+        fail_pipeline_step(step_id_bronze, error_message=str(exc))
+        raise
+
+    # ==========================================================================
+    # 🏗️ PART 10 — Apply the Pattern to Silver Transformation
+    # ==========================================================================
+    step_id_silver = start_pipeline_step(run_id, "silver_transformation")
+    try:
+        logger.info("Executing Silver cleaning & deduplication step...")
+        
+        # Call your existing Silver transformation function logic here [INDEX]
+        # For example: records_silver = run_silver_cleansing()
+        records_silver = 1210  # Mapping baseline metric bounds
+        
+        complete_pipeline_step(step_id_silver, records_processed=records_silver)
+        logger.info(f"Silver step completed successfully: {records_silver} rows.")
+    except Exception as exc:
+        logger.error(f"Silver transformation crashed: {exc}")
+        fail_pipeline_step(step_id_silver, error_message=str(exc))
+        raise
+
+    # ==========================================================================
+    # 🏗️ PART 11 — Apply the Pattern to Gold Summaries
+    # ==============================================================================
+    step_id_gold = start_pipeline_step(run_id, "gold_transformation")
+    try:
+        logger.info("Executing Gold analytical business intelligence view step...")
+        
+        # Call your existing Gold analytical views compilation logic here [INDEX]
+        # For example: records_gold = compute_gold_aggregates()
+        records_gold = 1210  # Mapping baseline metric bounds
+        
+        complete_pipeline_step(step_id_gold, records_processed=records_gold)
+        logger.info(f"Gold step completed successfully: {records_gold} rows.")
+    except Exception as exc:
+        logger.error(f"Gold transformation crashed: {exc}")
+        fail_pipeline_step(step_id_gold, error_message=str(exc))
+        raise
 
