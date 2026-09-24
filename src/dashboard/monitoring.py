@@ -4,6 +4,66 @@ from sqlalchemy import text
 from src.database import engine
 from src.dashboard.data import read_query
 
+
+
+@st.cache_data(ttl=15)
+def get_recent_runs(limit: int = 10) -> pd.DataFrame:
+    """Retrieves a rolling summary list of recent pipeline runs [INDEX]."""
+    query = """
+        SELECT run_id, pipeline_name, status, started_at, completed_at, records_processed
+        FROM pipeline_runs
+        ORDER BY run_id DESC
+        LIMIT :limit;
+    """
+    return read_query(query, "get_recent_runs", params={"limit": limit})
+
+
+@st.cache_data(ttl=15)
+def get_failed_runs() -> pd.DataFrame:
+    """
+    4. Failed Runs Query: Retrieves all executions marked as FAILED 
+    to isolate fatal application-level errors [INDEX].
+    """
+    query = """
+        SELECT run_id, pipeline_name, status, started_at, completed_at, error_message
+        FROM pipeline_runs
+        WHERE status = 'FAILED'
+        ORDER BY started_at DESC;
+    """
+    return read_query(query, "get_failed_runs")
+
+
+@st.cache_data(ttl=15)
+def get_failed_steps() -> pd.DataFrame:
+    """
+    5. Failed Steps Query: Retrieves individual task failures from pipeline_steps 
+    to pinpoint exactly where a bottleneck or crash occurred [INDEX].
+    """
+    query = """
+        SELECT run_id, step_name, status, records_processed, started_at, completed_at, error_message
+        FROM pipeline_steps
+        WHERE status = 'FAILED'
+        ORDER BY started_at DESC;
+    """
+    return read_query(query, "get_failed_steps")
+
+
+@st.cache_data(ttl=15)
+def get_run_summary() -> pd.DataFrame:
+    """
+    6. Run Summary KPI Query: Computes aggregate platform execution statistics 
+    using efficient in-database filtering passes [INDEX].
+    """
+    query = """
+        SELECT
+            COUNT(*) AS total_runs,
+            COUNT(*) FILTER (WHERE status = 'SUCCESS') AS successful_runs,
+            COUNT(*) FILTER (WHERE status = 'FAILED') AS failed_runs
+        FROM pipeline_runs;
+    """
+    return read_query(query, "get_run_summary")
+
+
 @st.cache_data(ttl=15)
 def get_open_alerts() -> pd.DataFrame:
     """
@@ -184,4 +244,38 @@ def get_step_level_durations(run_id: int) -> pd.DataFrame:
         ORDER BY step_id ASC;
     """
     return read_query(query, "get_step_level_durations", params={"run_id": run_id})
+@st.cache_data(ttl=15)
+def get_step_durations() -> pd.DataFrame:
+    """
+    10. Step Durations Tracker: Extracts exact execution intervals and record counts
+    per stage layer from pipeline_steps to monitor long-term performance drift [INDEX].
+    """
+    query = """
+        SELECT
+            run_id,
+            step_name,
+            status,
+            records_processed,
+            started_at,
+            completed_at,
+            EXTRACT(EPOCH FROM (completed_at - started_at)) AS duration_seconds
+        FROM pipeline_steps
+        WHERE completed_at IS NOT NULL
+        ORDER BY run_id DESC, started_at ASC;
+    """
+    return read_query(query, "get_step_durations")
+@st.cache_data(ttl=15)
+def get_last_successful_run() -> pd.DataFrame:
+    """
+    13. Last Successful Run Fetcher: Isolates the newest batch run record 
+    that achieved a SUCCESS status to drive visibility cards [INDEX].
+    """
+    query = """
+        SELECT run_id, pipeline_name, completed_at, records_processed, deployment_version
+        FROM pipeline_runs
+        WHERE status = 'SUCCESS'
+        ORDER BY completed_at DESC
+        LIMIT 1;
+    """
+    return read_query(query, "get_last_successful_run")
 

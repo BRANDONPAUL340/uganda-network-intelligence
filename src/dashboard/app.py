@@ -326,3 +326,140 @@ with st.expander("Active Database Activity Stream (pg_stat_activity)"):
 
 st.divider()
 st.caption("Uganda Network & Service Intelligence Data Platform — PostgreSQL 18 analytics view")
+# ==============================================================================
+# 🚨 OPERATIONS & MONITORING SECTION (Day 124 Enhanced UI Metrics Row)
+# ==============================================================================
+st.markdown("---")
+st.header("🚨 Pipeline Operations & Monitoring Cockpit")
+
+from src.dashboard.monitoring import (
+    get_recent_runs,
+    get_failed_runs,
+    get_failed_steps,
+    get_run_summary
+)
+
+# Fetch aggregate statistics data frames from database view models [INDEX]
+try:
+    pipeline_summary_df = get_run_summary()
+    recent_runs_df = get_recent_runs(limit=10)
+    failed_steps_df = get_failed_steps()
+except Exception as exc:
+    st.error(f"Unable to load active orchestration metrics logs: {exc}")
+    st.stop()
+
+# 7. Map summary data frames values into native Streamlit metric scorecards [INDEX]
+if not pipeline_summary_df.empty:
+    summary_row = pipeline_summary_df.iloc[0]
+    total_runs = int(summary_row["total_runs"] or 0)
+    successful_runs = int(summary_row["successful_runs"] or 0)
+    failed_runs = int(summary_row["failed_runs"] or 0)
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Pipeline Runs", total_runs)
+    with col2:
+        st.metric("Successful Executions", successful_runs, delta="🟢 Operational")
+    with col3:
+        if failed_runs > 0:
+            st.metric("Failed Executions", failed_runs, delta=f"⚠️ {failed_runs} Issues Tracked", delta_color="inverse")
+        else:
+            st.metric("Failed Executions", failed_runs, delta="✨ 0 Crashes")
+
+# Render recent execution table logs for full operator traceability
+st.markdown("### 📋 Recent Execution History Logs")
+if recent_runs_df.empty:
+    st.info("No active pipeline execution logs found on disk.")
+else:
+    st.dataframe(recent_runs_df, use_container_width=True, hide_index=True)
+
+if not failed_steps_df.empty:
+    st.markdown("### ❌ Fine-Grained Sub-Task Failures")
+    st.dataframe(failed_steps_df, use_container_width=True, hide_index=True)
+# ==============================================================================
+# 📊 STEP PERFORMANCE VISUAL ANALYTICS (Day 124 Core Charting Blocks)
+# ==============================================================================
+from src.dashboard.monitoring import get_step_durations
+
+try:
+    step_data_df = get_step_durations()
+except Exception as exc:
+    st.error(f"Unable to load active stage execution metrics logs: {exc}")
+    st.stop()
+
+st.markdown("---")
+st.subheader("⏱️ Micro-Stage Task Performance Analytics")
+
+if step_data_df.empty:
+    st.info("No sub-stage task runtime entries found to compute performance analytics.")
+else:
+    col_chart_left, col_chart_right = st.columns(2)
+    
+    with col_chart_left:
+        # 11. Display polished, correct tabular data grid first for full engineering audits [INDEX]
+        st.markdown("**Granular Task Execution Records**")
+        st.dataframe(
+            step_data_df[["run_id", "step_name", "status", "records_processed", "duration_seconds"]],
+            use_container_width=True,
+            hide_index=True
+        )
+        
+    with col_chart_right:
+        # 12. Display clean, aggregated average duration charts [INDEX]
+        st.markdown("**Historical Average Stage Runtimes (Seconds)**")
+        
+        # Calculate mean execution lengths grouped strictly by step names [INDEX]
+        avg_durations = (
+            step_data_df.groupby("step_name")["duration_seconds"]
+            .mean()
+            .reset_index()
+            .sort_values(by="duration_seconds", ascending=False)
+        )
+        
+        # Render high-visibility bar graph without clunky visualization bloat [INDEX]
+        st.bar_chart(
+            data=avg_durations,
+            x="step_name",
+            y="duration_seconds",
+            use_container_width=True
+        )
+# ==============================================================================
+# 🕐 HIGH-WATERMARK EXECUTIONS & CONDITIONAL FAILURE DRILL-DOWNS (Day 124 Final)
+# ==============================================================================
+from src.dashboard.monitoring import get_last_successful_run, get_failed_steps
+
+try:
+    last_success_df = get_last_successful_run()
+    failed_steps_df = get_failed_steps()
+except Exception as exc:
+    st.error(f"Unable to load active high-watermark analytics: {exc}")
+    st.stop()
+
+st.markdown("---")
+col_obs_left, col_obs_right = st.columns(2)
+
+with col_obs_left:
+    # 13. Render the Last Successful Run status card panel
+    st.subheader("🕐 Last Successful Run Baseline")
+    if last_success_df.empty:
+        st.info("No successful ingestion batch runs registered inside historical catalogs.")
+    else:
+        st.dataframe(
+            last_success_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+with col_obs_right:
+    # 14 & 15. Render Data-Responsive Failure Grids handling empty states gracefully
+    st.subheader("⚠️ Failed Pipeline Steps Log")
+    if failed_steps_df.empty:
+        # Better UI Pattern: Clear success notification when zero rows match [INDEX]
+        st.success("✅ **System Clean:** No failed pipeline sub-stage steps found on disk.")
+    else:
+        st.warning(f"🚨 **{len(failed_steps_df)} Faulty Sub-Task Executions Flagged!**")
+        st.dataframe(
+            failed_steps_df[["run_id", "step_name", "status", "error_message", "completed_at"]],
+            use_container_width=True,
+            hide_index=True
+        )
