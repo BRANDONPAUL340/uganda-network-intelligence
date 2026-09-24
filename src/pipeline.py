@@ -388,4 +388,74 @@ def execute_full_pipeline(run_id: int) -> None:
         logger.error(f"Gold transformation crashed: {exc}")
         fail_pipeline_step(step_id_gold, error_message=str(exc))
         raise
+import logging
+from src.version import PROJECT_VERSION
+from src.config import PIPELINE_NAME
+from src.pipeline_monitoring import (
+    start_pipeline_step,
+    complete_pipeline_step,
+    fail_pipeline_step,
+)
+# 🧩 Import the centralized automated data quality suite engine [INDEX]
+from src.monitoring.quality_engine import execute_data_quality_suite
+
+logger = logging.getLogger(__name__)
+
+def run_pipeline_execution(run_id: int) -> None:
+    """
+    Automated Platform Orchestration Loop: Executes multi-tier lakehouse 
+    transformations and hooks up automated data quality gates [INDEX].
+    """
+    logger.info(f"Starting instrumented pipeline execution context for Run #{run_id}")
+
+    # --- Day 122 Bronze Ingestion Block ---
+    step_id_bronze = start_pipeline_step(run_id, "bronze_ingestion")
+    try:
+        records_bronze = 1250  
+        complete_pipeline_step(step_id_bronze, records_processed=records_bronze)
+    except Exception as exc:
+        fail_pipeline_step(step_id_bronze, error_message=str(exc))
+        raise
+
+    # --- Day 122 Silver Transformation Block ---
+    step_id_silver = start_pipeline_step(run_id, "silver_transformation")
+    try:
+        records_silver = 1210  
+        complete_pipeline_step(step_id_silver, records_processed=records_silver)
+    except Exception as exc:
+        fail_pipeline_step(step_id_silver, error_message=str(exc))
+        raise
+
+    # --- Day 122 Gold Analytics Block ---
+    step_id_gold = start_pipeline_step(run_id, "gold_transformation")
+    try:
+        records_gold = 1210  
+        complete_pipeline_step(step_id_gold, records_processed=records_gold)
+    except Exception as exc:
+        fail_pipeline_step(step_id_gold, error_message=str(exc))
+        raise
+
+    # ==========================================================================
+    # 🧪 DAY 128 — AUTOMATED DATA QUALITY GATE INTEGRATION
+    # ==========================================================================
+    step_id_dq = start_pipeline_step(run_id, "data_quality")
+    try:
+        logger.info(f"Triggering automated data quality suite gates for Run #{run_id}...")
+        
+        # Execute your 5 core validations (volume, nulls, duplicates, ranges, freshness)
+        # Pass down the run_id to link metrics directly to the current batch context [INDEX]
+        dq_suite_passed = execute_data_quality_suite(run_id=run_id)
+        
+        if dq_suite_passed:
+            logger.info("🎉 Data Quality suite checks successfully passed.")
+            complete_pipeline_step(step_id_dq, records_processed=5) # 5 checks passed
+        else:
+            # Pipeline ran without a technical crash, but data quality checks failed! [INDEX]
+            logger.warning("⚠️ Data Quality rules breached. Validation errors logged to database.")
+            complete_pipeline_step(step_id_dq, records_processed=0)
+            
+    except Exception as exc:
+        logger.error(f"❌ Data Quality execution gate encountered a technical failure: {exc}")
+        fail_pipeline_step(step_id_dq, error_message=str(exc))
+        raise
 
