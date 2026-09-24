@@ -119,7 +119,7 @@ st.header("🟢 Core Pipeline Infrastructure Health")
 if current_health.empty:
     st.warning("No pipeline health indicators available.")
 else:
-    pipeline_status = current_health.iloc["overall_status"]
+    pipeline_status = current_health["overall_status"].iloc[0]
     if pipeline_status == "HEALTHY":
         st.success(f"Pipeline Health Status: **{pipeline_status}** (⚡ Engine operating normally)")
     else:
@@ -176,15 +176,137 @@ with col_an2:
 # ==============================================================================
 st.markdown("---")
 st.header("📊 Cellular Sites Performance Metrics")
-if network_summary.empty or network_summary.iloc["total_sites"] is None:
+
+if network_summary.empty or network_summary["total_sites"].iloc[0] is None:
     st.warning("No cellular tower performance values found within these filter targets.")
 else:
-    summary = network_summary.iloc
+    summary = network_summary.iloc[0]
+
     col_net1, col_net2, col_net3, col_net4 = st.columns(4)
-    col_net1.metric("Active Towers", int(summary["total_sites"] or 0))
-    col_net2.metric("Total Ingested Data (MB)", f"{float(summary['avg_traffic_mb'] or 0):,.2f}")
-    col_net3.metric("Avg Latency Metric", f"{float(summary['avg_latency_ms'] or 0):.2f}ms")
-    col_net4.metric("Tower Link Availability", f"{float(summary['avg_availability_pct'] or 0):.2f}%")
+
+    col_net1.metric(
+        "Active Towers",
+        int(summary["total_sites"] or 0)
+    )
+
+    col_net2.metric(
+        "Total Ingested Data (MB)",
+        f"{float(summary['avg_traffic_mb'] or 0):,.2f}"
+    )
+
+    col_net3.metric(
+        "Avg Latency Metric",
+        f"{float(summary['avg_latency_ms'] or 0):.2f}ms"
+    )
+
+    col_net4.metric(
+        "Tower Link Availability",
+        f"{float(summary['avg_availability_pct'] or 0):.2f}%"
+    )
+# ==============================================================================
+# 🕵️‍♂️ CONTAINER SECTION: Incident Lineage Investigation & Traceability Center
+# ==============================================================================
+st.markdown("---")
+st.header("🕵️‍♂️ Incident Lineage Investigation Center")
+
+from src.dashboard.monitoring import (
+    get_incident_complete_context,
+    get_stage_details,
+    get_run_lineage,
+    get_current_processing_watermarks,
+)
+
+if not recent_alerts.empty:
+    alert_choices = sorted(recent_alerts["alert_id"].dropna().unique().tolist(), reverse=True)
+    selected_alert_id = st.selectbox("Select an Alert ID to map execution context & lineage roots", alert_choices)
+    
+    if selected_alert_id:
+        # Fetch combined incident query context blocks [INDEX]
+        incident_df = get_incident_complete_context(selected_alert_id)
+        
+        if not incident_df.empty:
+            inc = incident_df.iloc[0]
+            run_id = inc["run_id"]
+            failed_stage = inc["stage_name"]
+            
+            # 17. Render Consolidated Incident Card Status Grid
+            st.markdown(f"### 🚨 INCIDENT #{inc['alert_id']}")
+            col_inc1, col_inc2 = st.columns(2)
+            with col_inc1:
+                st.info(f"**Alert Name:** `{inc['alert_name']}`\n\n**Message:** {inc['message']}")
+                st.write(f"**Triggered At:** `{inc['triggered_at']}`")
+                st.write(f"**Correlated Run ID:** `{int(run_id) if pd.notna(run_id) else 'N/A (Legacy/No Context)'}`")
+            with col_inc2:
+                st.write(f"**Incident Status:** `{inc['status']}`")
+                st.write(f"**Severity Level:** `{inc['severity']}`")
+                st.write(f"**Target Layer:** `{failed_stage or 'N/A'}`")
+                if pd.notna(inc['resolved_at']):
+                    st.write(f"**Resolved At:** `{inc['resolved_at']}`")
+            
+            # Conditionally expose execution metrics if a valid pipeline run is bound to the alert [INDEX]
+            if pd.notna(run_id):
+                run_id_int = int(run_id)
+                
+                st.markdown("---")
+                st.subheader("⚙️ Correlated Pipeline Run Parameters")
+                col_pr1, col_op2, col_pr3 = st.columns(3)
+                col_pr1.metric("Pipeline Name", str(inc["pipeline_name"]))
+                col_op2.metric("Execution Status", str(inc["pipeline_status"]))
+                col_pr3.metric("Total Records Processed", f"{int(inc['records_processed'] or 0):,}")
+                
+                # 18. Add Stage Context Block Grids [INDEX]
+                st.markdown("---")
+                col_stg, col_wm = st.columns(2)
+                
+                with col_stg:
+                    st.subheader("⏱️ Pipeline Stages Execution Breakdown")
+                    stage_df = get_stage_details(run_id_int)
+                    if stage_df.empty:
+                        st.info("No sub-stage runs registered for this pipeline run instance.")
+                    else:
+                        st.dataframe(stage_df[["stage_name", "status", "duration_seconds", "started_at"]], 
+                                     use_container_width=True, hide_index=True)
+                
+                with col_wm:
+                    # 15. Connect Incremental Data Watermark Offsets [INDEX]
+                    st.subheader("🎯 Active Processing Watermarks State")
+                    watermarks_df = get_current_processing_watermarks()
+                    if watermarks_df.empty:
+                        st.info("No system processing watermarks logged inside tracking tables.")
+                    else:
+                        st.dataframe(watermarks_df[["stage_name", "source_name", "last_raw_measurement_id", "updated_at"]], 
+                                     use_container_width=True, hide_index=True)
+                
+                # 19. Add Visual Lineage Trace Flow Diagrams
+                st.markdown("---")
+                st.subheader("🗺️ Data Lineage Ingestion Flow Trace")
+                lineage_df = get_run_lineage(run_id_int)
+                
+                # Render metadata structural text diagram [INDEX]
+                l_raw = "✅ measurements (RAW Vault Ingested)"
+                l_silver = "🟢 SILVER (Cleaned & Deduplicated)" if failed_stage != "SILVER" else "❌ SILVER (Failed layer block)"
+                l_gold = "🟡 GOLD (Analytical Reporting Layer)" if failed_stage not in ["SILVER", "GOLD"] else "⚪ GOLD (Not run due to failure)"
+                
+                st.text(f"""
+                {l_raw}
+                       │
+                       ▼
+                {l_silver}
+                       │
+                       ▼
+                {l_gold}
+                """)
+                
+                if not lineage_df.empty:
+                    with st.expander("Expose Detailed Affected Table Record Rows"):
+                        st.dataframe(lineage_df, use_container_width=True, hide_index=True)
+            else:
+                st.warning("ℹ️ This incident record does not contain active pipeline run-time correlation mapping context metadata fields.")
+        else:
+            st.error("Could not fetch trace parameters for the chosen alert token.")
+else:
+    st.info("No incidents logged in the history table ledger to investigate.")
+
 
 
 # ==============================================================================

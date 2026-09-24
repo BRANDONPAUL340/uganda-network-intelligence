@@ -234,7 +234,6 @@ def main():
         total_records_processed = silver_records + gold_records
         logger.info("Pipeline processed %s records", total_records_processed)
 
-    
         # -------------------------------------------------
         # 5. SUCCESS PATH CLOSEOUT
         # -------------------------------------------------
@@ -243,12 +242,7 @@ def main():
             status="SUCCESS",
             records_processed=total_records_processed,
             duration_seconds=total_duration,
-            current_stage="SUCCESS",
-            silver_records_processed=silver_records,
-            gold_records_processed=gold_records,
-            quality_checks_run=quality_result["checks"],
-            quality_checks_failed=quality_result["failed"],
-            quality_checks_passed=quality_result["passed"],
+            current_stage="SUCCESS"
         )
         logger.info("============================================================")
         logger.info(f"Pipeline completed successfully in {total_duration:.2f} seconds 🎉")

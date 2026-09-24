@@ -1,6 +1,7 @@
 import logging
 from sqlalchemy import text
 from src.database import engine
+from src.transformation.raw_to_silver import promote_new_raw_to_silver
 from src.config import (
     CRITICAL_AVAILABILITY_PCT,
     CRITICAL_PACKET_LOSS_PCT,
@@ -76,35 +77,29 @@ def upgrade_silver_schemas():
 
 def load_silver_measurements():
     """
-    Transforms raw staging data and loads it into the silver_measurements fact tier,
-    denormalizing site and equipment attributes into a single wide model.
+    Incrementally promote new records from raw_measurements into
+    silver_measurements using the existing Silver watermark.
     """
     print("Loading new measurements into Silver...")
-    logger.info("Executing denormalized insert into silver_measurements fact tier...")
+    logger.info("Starting incremental Raw -> Silver promotion")
 
-    sql = """
-    INSERT INTO silver_measurements (
-        measurement_id, measured_at, site_id, site_name, region, district, site_type,
-        equipment_id, equipment_type, manufacturer, model, traffic_mb, latency_ms,
-        packet_loss_pct, signal_strength_dbm, availability_pct, ingested_at
+    result = promote_new_raw_to_silver(source_name="measurements")
+
+    records_loaded = result["records_loaded"]
+    previous_watermark = result["previous_watermark"]
+    new_watermark = result["new_watermark"]
+
+    print(f"New Silver measurements loaded: {records_loaded}")
+
+    logger.info(
+        "Raw -> Silver promotion complete: loaded=%s, "
+        "watermark %s -> %s",
+        records_loaded,
+        previous_watermark,
+        new_watermark,
     )
-    SELECT 
-        m.measurement_id, m.measured_at, s.site_id, s.site_name, s.region, s.district, s.site_type,
-        e.equipment_id, e.equipment_type, e.manufacturer, e.model, m.traffic_mb, m.latency_ms,
-        m.packet_loss_pct, m.signal_strength_dbm, m.availability_pct, CURRENT_TIMESTAMP
-    FROM measurements m
-    JOIN sites s ON m.site_id = s.site_id
-    JOIN equipment e ON m.equipment_id = e.equipment_id
-    ON CONFLICT (measurement_id) DO NOTHING;
-    """
-    with engine.begin() as connection:
-        result = connection.execute(text(sql))
-        records_loaded = result.rowcount  # 🕵️‍♂️ Captures row counts accurately
-        
-        print(f"New Silver measurements loaded: {records_loaded}")
-        logger.info(f"Silver measurements tier populated | records_loaded={records_loaded}")
-        return records_loaded  # 🔑 Explicitly return row counts to caller
 
+    return records_loaded
 
 def load_silver_network_health(latest_batch_id=3, run_id=112):
     """

@@ -145,5 +145,10 @@ def promote_new_raw_to_silver(source_name="measurements"):
     with engine.connect() as connection:
         new_last_id = connection.execute(new_last_id_query, {"last_id": last_id}).scalar_one()
     if new_last_id > last_id:
-        advance_watermark(PIPELINE_NAME, source_name, new_last_id)
+        advance_watermark(
+              PIPELINE_NAME,
+              "SILVER",
+              source_name,
+              new_last_id
+)
     return {"records_loaded": promoted_count, "previous_watermark": last_id, "new_watermark": new_last_id}
