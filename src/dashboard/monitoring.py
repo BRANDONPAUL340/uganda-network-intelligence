@@ -152,3 +152,36 @@ def get_current_processing_watermarks() -> pd.DataFrame:
         ORDER BY stage_name ASC, source_name ASC;
     """
     return read_query(query, "get_current_processing_watermarks")
+
+@st.cache_data(ttl=15)
+def get_recent_pipeline_runs(limit: int = 10) -> pd.DataFrame:
+    """
+    10. Summary Metrics: Fetches recent pipeline batch runs 
+    from the centralized database monitoring view [1, 2].
+    """
+    query = """
+        SELECT DISTINCT run_id, pipeline_name, pipeline_status, 
+               pipeline_started_at, pipeline_completed_at, pipeline_duration_seconds
+        FROM pipeline_monitoring_summary
+        ORDER BY run_id DESC
+        LIMIT :limit;
+    """
+    return read_query(query, "get_recent_pipeline_runs", params={"limit": limit})
+
+
+@st.cache_data(ttl=15)
+def get_step_level_durations(run_id: int) -> pd.DataFrame:
+    """
+    6. Duration Analytics: Retrieves task execution durations and processed 
+    record counts for a specific pipeline iteration run [1, 2].
+    """
+    query = """
+        SELECT step_name, step_status, records_processed,
+               EXTRACT(EPOCH FROM (step_completed_at - step_started_at)) AS step_duration_seconds,
+               error_message
+        FROM pipeline_monitoring_summary
+        WHERE run_id = :run_id AND step_name IS NOT NULL
+        ORDER BY step_id ASC;
+    """
+    return read_query(query, "get_step_level_durations", params={"run_id": run_id})
+
