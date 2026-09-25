@@ -340,3 +340,58 @@ def get_run_step_durations(run_id: int) -> pd.DataFrame:
         ORDER BY step_id ASC;
     """
     return read_query(query, "get_run_step_durations", params={"run_id": run_id})
+@st.cache_data(ttl=15)
+def get_quality_failure_rates() -> pd.DataFrame:
+    """
+    4. Failure Rate Analytics: Computes the longitudinal failure percentage rate 
+    per check family to highlight persistent pipeline data quality issues [INDEX].
+    """
+    query = """
+        SELECT check_name, COUNT(*) AS total_checks,
+               COUNT(*) FILTER (WHERE status = 'FAIL') AS failures,
+               ROUND(100.0 * COUNT(*) FILTER (WHERE status = 'FAIL') / NULLIF(COUNT(*), 0), 2) AS failure_rate_pct
+        FROM data_quality_results
+        GROUP BY check_name
+        ORDER BY failure_rate_pct DESC;
+    """
+    return read_query(query, "get_quality_failure_rates")
+
+
+@st.cache_data(ttl=15)
+def get_latest_quality_status() -> pd.DataFrame:
+    """
+    8. High-Watermark Quality Selector: Employs a window function to partition and extract 
+    the absolute latest status snapshot entry for every unique quality check [INDEX].
+    """
+    query = """
+        SELECT check_name, status, check_value, failed_records, checked_at
+        FROM (
+            SELECT dqr.*,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY check_name 
+                       ORDER BY checked_at DESC, quality_id DESC
+                   ) AS rn
+            FROM data_quality_results dqr
+        ) x
+        WHERE rn = 1
+        ORDER BY check_name;
+    """
+    return read_query(query, "get_latest_quality_status")
+
+
+@st.cache_data(ttl=15)
+def get_quality_run_summary() -> pd.DataFrame:
+    """
+    6. Run Quality Summary: Condenses the quality compliance profile across 
+    individual run batches to output overall health ratios for dashboard cards [INDEX].
+    """
+    query = """
+        SELECT run_id, COUNT(*) AS total_checks,
+               COUNT(*) FILTER (WHERE status = 'PASS') AS passed,
+               COUNT(*) FILTER (WHERE status = 'WARNING') AS warnings,
+               COUNT(*) FILTER (WHERE status = 'FAIL') AS failures
+        FROM data_quality_results
+        GROUP BY run_id
+        ORDER BY run_id DESC;
+    """
+    return read_query(query, "get_quality_run_summary")
