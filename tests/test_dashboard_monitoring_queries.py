@@ -96,4 +96,13 @@ def test_latest_quality_status_returns_dataframe_with_window_partitions():
     if not result.empty:
         assert "status" in result.columns
         assert "check_name" in result.columns
+def test_get_run_incidents_with_unknown_id_returns_empty_dataframe():
+    """ARRANGE, ACT & ASSERT: Verifies that an out-of-bounds run_id returns an empty DataFrame instead of crashing [INDEX]."""
+    from src.dashboard.monitoring import get_run_incidents
+    
+    # Query using an unallocated out-of-bounds mock run ID parameter
+    result = get_run_incidents(999999)
+    
+    assert isinstance(result, pd.DataFrame)
+    assert result.empty is True
 

@@ -937,4 +937,71 @@ else:
                 # Expose full quality results matrix
                 with st.expander("Expose Complete Data Quality Results Ledger"):
                     st.dataframe(quality_df[["check_name", "status", "records_checked", "failed_records", "check_value", "message"]], use_container_width=True, hide_index=True)
+# ==============================================================================
+# 🚨 CONTAINER LAYER: Incident Command Center & Tiered Alert Routing (Day 136 Final)
+# ==============================================================================
+st.markdown("---")
+st.header("🚨 Incident Command Center & Operational Alerting")
 
+from src.dashboard.monitoring import (
+    get_open_incident_count,
+    get_open_incidents_by_severity,
+    get_open_incidents
+)
+
+try:
+    open_count = get_open_incident_count()
+    severity_df = get_open_incidents_by_severity()
+    open_incidents_list_df = get_open_incidents()
+except Exception as exc:
+    st.error(f"Unable to synchronize live operational incident summaries: {exc}")
+    st.stop()
+
+# --- 17. ENFORCE TIERED OPERATIONAL IN-DASHBOARD ALERTING ---
+if open_incidents_list_df is not None and not open_incidents_list_df.empty:
+    # Filter out highly critical vs sub-critical open incidents in memory
+    high_severity_alerts = open_incidents_list_df[open_incidents_list_df["severity"] == "HIGH"]
+    medium_low_alerts = open_incidents_list_df[open_incidents_list_df["severity"].isin(["MEDIUM", "LOW"])]
+    
+    # Trigger urgent errors for high-severity alerts [INDEX]
+    if not high_severity_alerts.empty:
+        st.error(f"🔥 **CRITICAL CALLOUT:** {len(high_severity_alerts)} high-severity incident(s) are currently OPEN and require immediate engineering triage.")
+        
+    # Trigger warnings for medium/low issues [INDEX]
+    if not medium_low_alerts.empty:
+        st.warning(f"⚠️ **OPERATIONAL NOTICE:** {len(medium_low_alerts)} medium or low-severity incident(s) require engineering attention.")
+else:
+    st.success("✨ **SLA TARGET MET:** All platform data quality constraints and pipeline stages are currently nominal.")
+
+# --- 2. Render Severity Summary Scorecards ---
+st.markdown("#### 🚦 Active Incidents Stratification by Severity")
+high_count = 0
+medium_count = 0
+low_count = 0
+
+if severity_df is not None and not severity_df.empty:
+    for _, row in severity_df.iterrows():
+        sev_name = str(row["severity"]).upper()
+        sev_total = int(row["total"] or 0)
+        if sev_name == "HIGH":
+            high_count = sev_total
+        elif sev_name == "MEDIUM":
+            medium_count = sev_total
+        elif sev_name == "LOW":
+            low_count = sev_total
+
+col_sev1, col_sev2, col_sev3 = st.columns(3)
+with col_sev1:
+    st.metric("🔥 High Severity", high_count)
+with col_sev2:
+    st.metric("⚠️ Medium Severity", medium_count)
+with col_sev3:
+    st.metric("ℹ️ Low Severity", low_count)
+
+# --- 3. Expose Master Triage Data Grid ---
+if open_incidents_list_df is not None and not open_incidents_list_df.empty:
+    st.markdown("##### 🔴 Active Triage Queue Logs")
+    st.dataframe(
+        open_incidents_list_df[["incident_id", "run_id", "check_name", "severity", "message", "created_at"]],
+        use_container_width=True, hide_index=True
+    )

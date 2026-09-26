@@ -500,3 +500,62 @@ def get_run_incidents(run_id: int) -> pd.DataFrame:
     """
     return read_query(query, "get_run_incidents", params={"run_id": run_id})
 
+@st.cache_data(ttl=15)
+def get_open_incident_count() -> int:
+    """
+    Part 5. Open Incident Counter: Returns the absolute number of currently 
+    unresolved data platform issues needing engineering triage [INDEX].
+    """
+    query = """
+        SELECT COUNT(*) AS open_incidents
+        FROM pipeline_incidents
+        WHERE status = 'OPEN';
+    """
+    df = read_query(query, "get_open_incident_count")
+    if not df.empty:
+        return int(df.iloc[0]["open_incidents"])
+    return 0
+
+
+@st.cache_data(ttl=15)
+def get_open_incidents_by_severity() -> pd.DataFrame:
+    """
+    Part 6. Severity Stratification: Aggregates open issues by operational severity categories 
+    (LOW, MEDIUM, HIGH) to feed the dashboard summary cards [INDEX].
+    """
+    query = """
+        SELECT severity, COUNT(*) AS total
+        FROM pipeline_incidents
+        WHERE status = 'OPEN'
+        GROUP BY severity
+        ORDER BY severity;
+    """
+    return read_query(query, "get_open_incidents_by_severity")
+@st.cache_data(ttl=15)
+def get_incident_date_trends() -> pd.DataFrame:
+    """
+    20. Incidents by Day: Groups historical entries by calendar date 
+    to isolate operational windows where pipeline quality deteriorated [INDEX].
+    """
+    query = """
+        SELECT DATE(created_at) AS incident_date, COUNT(*) AS incidents_created
+        FROM pipeline_incidents
+        GROUP BY DATE(created_at)
+        ORDER BY incident_date ASC;
+    """
+    return read_query(query, "get_incident_date_trends")
+
+
+@st.cache_data(ttl=15)
+def get_incident_status_ratios() -> pd.DataFrame:
+    """
+    20. Resolved vs Open: Compares active open issues against closed historical 
+    records to monitor engineering backlog and cleanup speeds [INDEX].
+    """
+    query = """
+        SELECT status, COUNT(*) AS total
+        FROM pipeline_incidents
+        GROUP BY status
+        ORDER BY status ASC;
+    """
+    return read_query(query, "get_incident_status_ratios")
