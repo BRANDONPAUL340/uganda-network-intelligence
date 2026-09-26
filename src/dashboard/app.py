@@ -545,3 +545,396 @@ else:
                     )
         else:
             st.error("Unable to extract details for the selected run token.")
+# ==============================================================================
+# 📊 DATA QUALITY COMPLIANCE BOARD PANEL (Day 132 Core Feature Integration)
+# ==============================================================================
+st.markdown("---")
+st.header("🎯 Data Quality Compliance Board")
+
+from src.dashboard.monitoring import (
+    get_quality_failure_rates,
+    get_latest_quality_status,
+    get_quality_run_summary
+)
+
+# 1. Fetch historical compliance data blocks from your data-access layer [INDEX]
+try:
+    dq_summary_df = get_quality_run_summary()
+    dq_latest_df = get_latest_quality_status()
+    dq_failures_df = get_quality_failure_rates()
+except Exception as exc:
+    st.error(f"Encountered a resource error loading data quality history frames: {exc}")
+    st.stop()
+
+if dq_summary_df.empty and dq_latest_df.empty:
+    st.info("No historical data quality validation records found on disk to populate trends.")
+else:
+    # --- UI CONTAINER 1: CORE AGGREGATE KPI SCORECARDS ---
+    total_checks_count = len(dq_latest_df) if not dq_latest_df.empty else 0
+    
+    passed_count = 0
+    warning_count = 0
+    failure_count = 0
+    
+    if not dq_latest_df.empty:
+        passed_count = len(dq_latest_df[dq_latest_df["status"] == "PASS"])
+        warning_count = len(dq_latest_df[dq_latest_df["status"] == "WARNING"])
+        failure_count = len(dq_latest_df[dq_latest_df["status"] == "FAIL"])
+
+    col_dq1, col_dq2, col_dq3, col_dq4 = st.columns(4)
+    with col_dq1:
+        st.metric("Active Rules Monitored", total_checks_count)
+    with col_dq2:
+        st.metric("Rules Passing (PASS)", passed_count, delta="🟢 Nominal")
+    with col_dq3:
+        st.metric("Sub-Critical Warnings", warning_count, delta="🟡 Review Needed" if warning_count > 0 else "✨ 0 Warnings", delta_color="inverse" if warning_count > 0 else "normal")
+    with col_dq4:
+        st.metric("Critical Blocks (FAIL)", failure_count, delta="🚨 Breach Active" if failure_count > 0 else "✅ Clean", delta_color="inverse")
+
+    # --- UI CONTAINER 2: LONGITUDINAL HISTORY TRENDS & REPETITION FALLOUT RATES ---
+    st.markdown("---")
+    col_trend, col_rates = st.columns(2)
+    
+    with col_trend:
+        st.subheader("📈 Quality Status Over Time")
+        if dq_summary_df.empty:
+            st.info("Insufficient runtime iterations to draw multi-batch quality timelines.")
+        else:
+            # Map running totals into interactive area or bar chart matrices [INDEX]
+            chart_data = dq_summary_df.set_index("run_id")[["passed", "warnings", "failures"]]
+            st.bar_chart(chart_data, use_container_width=True)
+            st.caption("Historical trace showing compliance counts mapped per unique execution batch run ID.")
+
+    with col_rates:
+        st.subheader("🧮 Failure Rate By Quality Check")
+        if dq_failures_df.empty:
+            st.info("No historical metric failures tracked across system rules.")
+        else:
+            # Render a neat bar chart to plot distinct category densities [INDEX]
+            st.bar_chart(
+                data=dq_failures_df,
+                x="check_name",
+                y="failure_rate_pct",
+                use_container_width=True
+            )
+            st.caption("Percentage rate indicating which rule family breaches constraints most frequently.")
+
+    # --- UI CONTAINER 3: HIGH-WATERMARK RESULTS MATRIX GRID ---
+    st.markdown("---")
+    st.subheader("📋 Latest Quality Validation Results Matrix")
+    if dq_latest_df.empty:
+        st.info("No baseline quality records returned.")
+    else:
+        # Better UI Pattern: Map data-responsive styling to tables based on column values [INDEX]
+        def style_status_row(val):
+            if val == "PASS":
+                return "background-color: rgba(46, 204, 113, 0.15); color: #2ecc71;"
+            elif val == "WARNING":
+                return "background-color: rgba(241, 196, 15, 0.15); color: #f1c40f;"
+            return "background-color: rgba(231, 76, 60, 0.15); color: #e74c3c;"
+
+        try:
+            styled_latest = dq_latest_df[["check_name", "status", "check_value", "failed_records", "checked_at"]].style.applymap(
+                style_status_row, subset=["status"]
+            )
+            st.dataframe(styled_latest, use_container_width=True, hide_index=True)
+        except Exception:
+            # Fallback to standard dataframe if style engine encounters pandas environment discrepancies
+            st.dataframe(dq_latest_df[["check_name", "status", "check_value", "failed_records", "checked_at"]], use_container_width=True, hide_index=True)
+# ==============================================================================
+# 🎯 CONTAINER LAYER: Configurable Data Quality Compliance Board
+# ==============================================================================
+st.markdown("---")
+st.header("🎯 Data Quality Compliance Board")
+
+
+
+# 15. Load Data Assets Chronologically first to establish clean decoupling [INDEX]
+try:
+    summary_df = get_quality_summary()
+    failure_rates_df = get_quality_failure_rates()
+    history_df = get_quality_history()
+    latest_quality_df = get_latest_quality_status()
+except Exception as exc:
+    st.error(f"Encountered a resource error loading data quality history frames: {exc}")
+    st.stop()
+
+if summary_df.empty or latest_quality_df.empty:
+    st.info("No historical data quality validation records found on disk to populate dashboards.")
+else:
+    # --- 1. Top-Level Summary Metrics Row ---
+    summary_row = summary_df.iloc[0]
+    total_checks = int(summary_row["total_checks"] or 0)
+    passed = int(summary_row["passed"] or 0)
+    warnings = int(summary_row["warnings"] or 0)
+    failures = int(summary_row["failures"] or 0)
+
+    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    with col_m1:
+        st.metric("Total Rules Checked", f"{total_checks:,}")
+    with col_m2:
+        st.metric("Passed Assertions", f"{passed:,}", delta="🟢 Nominal")
+    with col_m3:
+        st.metric("Warnings Active", f"{warnings:,}", 
+                  delta=f"🟡 {warnings} Flags" if warnings > 0 else "✨ 0 Flags", 
+                  delta_color="inverse" if warnings > 0 else "normal")
+    with col_m4:
+        st.metric("Critical Failure Blocks", f"{failures:,}", 
+                  delta=f"🚨 {failures} Breaches" if failures > 0 else "✅ Clean", 
+                  delta_color="inverse")
+
+    # --- 2. Historical Failure Rates & Trend Analysis ---
+    st.markdown("---")
+    col_rates, col_trend = st.columns(2)
+    
+    with col_rates:
+        st.subheader("📉 Historical Rule Failure Rates")
+        if failure_rates_df.empty:
+            st.info("No failure metrics tracked across system rules.")
+        else:
+            st.dataframe(failure_rates_df, use_container_width=True, hide_index=True)
+
+    with col_trend:
+        st.subheader("📈 Metric Trend Analysis Over Time")
+        if history_df.empty:
+            st.info("Insufficient historical iterations to plot timelines.")
+        else:
+            available_checks = sorted(history_df["check_name"].dropna().unique().tolist())
+            selected_check = st.selectbox("🔎 Select a check family to map trend lines:", options=available_checks)
+            if selected_check:
+                selected_history = history_df[history_df["check_name"] == selected_check]
+                st.line_chart(selected_history.set_index("run_id")["check_value"], use_container_width=True)
+
+    # --- 3. 🎛️ Interactive Status Selector & Latest Quality Table ---
+    st.markdown("---")
+    st.subheader("📋 Latest Quality Validation Results")
+    
+    # 14. Inject a clean status selection dropdown filter [INDEX]
+    status_filter = st.selectbox(
+        "Filter Latest Records by Compliance Status:",
+        options=["ALL", "PASS", "WARNING", "FAIL"],
+        index=0
+    )
+    
+    # Perform defensive duplication slice operation [INDEX]
+    filtered_quality = latest_quality_df.copy()
+    if status_filter != "ALL":
+        filtered_quality = filtered_quality[filtered_quality["status"] == status_filter]
+        
+    if filtered_quality.empty:
+        st.info(f"✨ No active latest quality records match the filter criteria: `{status_filter}`")
+    else:
+        st.dataframe(
+            filtered_quality[["check_name", "status", "check_value", "failed_records", "checked_at"]],
+            use_container_width=True,
+            hide_index=True
+        )
+# ==============================================================================
+# 🕵️‍♂️ UNIFIED ROOT-CAUSE DRILL-DOWN COCKPIT (Day 133 Multi-Table Join View)
+# ==============================================================================
+from src.dashboard.monitoring import get_run_quality_details
+
+# Locate where steps_df and duration_df are fetched inside your selected_run_id block,
+# and add the data quality drill-down retrieval loop [INDEX]:
+if selected_run_id:
+    # (Your existing get_run_details, get_run_steps, and get_run_step_durations calls are here) [INDEX]
+    with st.spinner(f"Extracting unified metrics for Run #{selected_run_id}..."):
+        run_dq_details_df = get_run_quality_details(selected_run_id)
+
+    # --- TABULAR DRILL-DOWN VIEW NAVIGATION ---
+    st.markdown("### 🔍 Root-Cause Investigation Desk")
+    tab_steps, tab_quality = st.tabs(["⚙️ Internal Pipeline Steps", "🎯 Data Quality Assertions"])
+    
+    with tab_steps:
+        st.markdown(f"#### ⏱️ Sub-Stage Step Telemetry Matrix — Run #{selected_run_id}")
+        if steps_df.empty:
+            st.info("No sub-stage execution steps logged for this run.")
+        else:
+            st.dataframe(
+                steps_df[["step_id", "step_name", "status", "records_processed", "started_at", "completed_at"]],
+                use_container_width=True, hide_index=True
+            )
+            
+            # Display inline step execution crash errors [INDEX]
+            for _, step in steps_df.iterrows():
+                if step["status"] == "FAILED" and step["error_message"]:
+                    st.error(f"❌ **Crash Trace in Step '{step['step_name']}':** {step['error_message']}")
+
+    with tab_quality:
+        st.markdown(f"#### 🎯 Data Quality Audit Ledger Snapshots — Run #{selected_run_id}")
+        if run_dq_details_df.empty:
+            st.success("✅ **System Clean:** No data quality anomalies or breaches logged for this run execution.")
+        else:
+            # Better UI Pattern: Conditionally alert operations teams on failure rows [INDEX]
+            has_dq_failure = not run_dq_details_df[run_dq_details_df["status"] == "FAIL"].empty
+            if has_dq_failure:
+                st.error("🚨 **Critical Data Quality Breach Tracked for this Run!** Data quality rules were violated.")
+                
+            st.dataframe(
+                run_dq_details_df[["check_name", "status", "records_checked", "failed_records", "check_value", "message"]],
+                use_container_width=True, hide_index=True
+            )
+# ==============================================================================
+# 🕵️‍♂️ UNIFIED ROOT-CAUSE DRILL-DOWN COCKPIT (Day 133 Interface Layout)
+# ==============================================================================
+from src.dashboard.monitoring import (
+    get_available_runs,
+    get_run_details,
+    get_run_steps,
+    get_run_quality
+)
+
+st.markdown("---")
+st.header("🕵️‍♂️ Granular Ingestion Run Traceability Engine")
+
+# 11. Retrieve available runs for dropdown select list inputs [INDEX]
+try:
+    available_runs_df = get_available_runs()
+except Exception as exc:
+    st.error(f"Unable to synchronize interactive select components: {exc}")
+    st.stop()
+
+if available_runs_df.empty:
+    st.info("No active pipeline execution logs found on disk to investigate.")
+else:
+    # 12. Create the unified run selector dropdown filter menu [INDEX]
+    run_ids_list = available_runs_df["run_id"].tolist()
+    selected_run_id = st.selectbox(
+        "🔎 Choose an Ingestion Run ID to investigate multi-table metadata logs:",
+        options=run_ids_list,
+        index=0
+    )
+    
+    if selected_run_id:
+        # 10. Combine the Investigation Flow under a single shared run key parameter [INDEX]
+        with st.spinner(f"Synchronizing cross-tier logs for Run #{selected_run_id}..."):
+            run_details_df = get_run_details(selected_run_id)
+            steps_df = get_run_steps(selected_run_id)
+            quality_df = get_run_quality(selected_run_id)
+
+        # 13. Conditionally display top-level metrics headers [INDEX]
+        if run_details_df.empty:
+            st.warning(f"⚠️ No master context details found for Run #{selected_run_id}.")
+        else:
+            run_row = run_details_df.iloc[0]
+            
+            st.markdown(f"#### 📊 Execution Context Summary — Run #{selected_run_id}")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Run ID Target", f"#{run_row['run_id']}")
+            with col2:
+                # Changes color dynamically depending on string values [INDEX]
+                st.metric("Batch Execution Status", str(run_row["status"]))
+            with col3:
+                st.metric("Total Records Processed", f"{int(run_row['records_processed'] or 0):,}")
+
+            # Conditionally expose unhandled global stack trace logs if active [INDEX]
+            if str(run_row["status"]) == "FAILED" and pd.notna(run_row.get("error_message")):
+                st.error(f"🚨 **Global Pipeline Failure Traceback:** {run_row['error_message']}")
+
+            # Render Sub-Stage Tasks and Quality Assertions grids cleanly
+            st.markdown("##### ⚙️ Internal Sub-Stage Step Performance")
+            if steps_df.empty:
+                st.info("No sub-stage execution steps logged for this run.")
+            else:
+                st.dataframe(steps_df[["step_name", "status", "records_processed", "started_at"]], use_container_width=True, hide_index=True)
+
+            st.markdown("##### 🎯 Data Quality Assertions Ledger")
+            if quality_df.empty:
+                st.success("✅ **System Clean:** No data quality anomalies or breaches logged for this run.")
+            else:
+                st.dataframe(quality_df[["check_name", "status", "records_checked", "failed_records", "check_value", "message"]], use_container_width=True, hide_index=True)
+# ==============================================================================
+# 🚨 TRAGE VIEW: Isolated Fault Matrix & Layered Failure Audit (Day 133 Final)
+# ==============================================================================
+from src.dashboard.monitoring import get_available_runs, get_run_details, get_run_steps, get_run_quality
+
+st.markdown("---")
+st.header("🕵️‍♂️ Granular Ingestion Run Traceability Engine")
+
+try:
+    available_runs_df = get_available_runs()
+except Exception as exc:
+    st.error(f"Unable to synchronize interactive select components: {exc}")
+    st.stop()
+
+if available_runs_df.empty:
+    st.info("No active pipeline execution logs found on disk to investigate.")
+else:
+    run_ids_list = available_runs_df["run_id"].tolist()
+    selected_run_id = st.selectbox(
+        "🔎 Choose an Ingestion Run ID to investigate multi-table metadata logs:",
+        options=run_ids_list, index=0
+    )
+    
+    if selected_run_id:
+        with st.spinner(f"Synchronizing cross-tier logs for Run #{selected_run_id}..."):
+            run_details_df = get_run_details(selected_run_id)
+            steps_df = get_run_steps(selected_run_id)
+            quality_df = get_run_quality(selected_run_id)
+
+        if run_details_df.empty:
+            st.warning(f"⚠️ No master context details found for Run #{selected_run_id}.")
+        else:
+            run_row = run_details_df.iloc[0]
+            
+            st.markdown(f"#### 📊 Execution Context Summary — Run #{selected_run_id}")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Run ID Target", f"#{run_row['run_id']}")
+            with col2:
+                st.metric("Batch Execution Status", str(run_row["status"]))
+            with col3:
+                st.metric("Total Records Processed", f"{int(run_row['records_processed'] or 0):,}")
+
+            # ==================================================================
+            # ⚙️ 14 & 16. DISPLAY AND HIGHLIGHT FAILED PIPELINE STEPS
+            # ==================================================================
+            st.markdown("---")
+            st.subheader("⚙️ Pipeline Steps Lifecycle Status")
+            if steps_df.empty:
+                st.info("No sub-stage execution steps logged for this run.")
+            else:
+                # Isolate failing execution blocks cleanly using boolean slicing indexing [INDEX]
+                failed_steps = steps_df[steps_df["status"].isin(["FAILED", "FAIL"])]
+                
+                if failed_steps.empty:
+                    st.success("✅ **Infrastructure Clean:** All software transformation steps executed without unhandled technical errors [INDEX].")
+                else:
+                    st.error(f"⚠️ **{len(failed_steps)} Technical Step Failure(s) Tracked!** Review infrastructure parameters below:")
+                    st.dataframe(failed_steps[["step_name", "status", "error_message", "completed_at"]], use_container_width=True, hide_index=True)
+                
+                # Expose full step runtime matrix for chronological performance audit
+                with st.expander("Expose Complete Internal Step Performance Grid"):
+                    st.dataframe(steps_df[["step_name", "status", "records_processed", "started_at", "completed_at"]], use_container_width=True, hide_index=True)
+
+            # ==================================================================
+            # 🎯 15 & 16. DISPLAY AND HIGHLIGHT DATA QUALITY BREACHES
+            # ==================================================================
+            st.markdown("---")
+            st.subheader("🎯 Data Quality Assertions Status")
+            if quality_df.empty:
+                # 17. Distinguish: If pipeline failed early, quality rows will run completely blank [INDEX]
+                if str(run_row["status"]) in ["FAILED", "FAIL"]:
+                    st.warning("⚠️ **No Data Quality Results:** The software crashed or aborted before quality gates could execute [INDEX].")
+                else:
+                    st.info("ℹ️ No data quality verification records populated for this execution run yet.")
+            else:
+                # Isolate failing validation check rows cleanly using boolean slicing indexing [INDEX]
+                failed_quality = quality_df[quality_df["status"] == "FAIL"]
+                warning_quality = quality_df[quality_df["status"] == "WARNING"]
+                
+                if failed_quality.empty:
+                    st.success("✅ **Data Quality Clean:** No critical quality breaches found on disk for this run [INDEX].")
+                else:
+                    st.error(f"❌ **{len(failed_quality)} Critical Data Quality Rule Breach(es) Flagged!**")
+                    st.dataframe(failed_quality[["check_name", "status", "failed_records", "check_value", "message"]], use_container_width=True, hide_index=True)
+                
+                if not warning_quality.empty:
+                    st.warning(f"⚠️ **{len(warning_quality)} Sub-Critical Data Quality Warning(s) Registered:**")
+                    st.dataframe(warning_quality[["check_name", "status", "failed_records", "check_value", "message"]], use_container_width=True, hide_index=True)
+
+                # Expose full quality results matrix
+                with st.expander("Expose Complete Data Quality Results Ledger"):
+                    st.dataframe(quality_df[["check_name", "status", "records_checked", "failed_records", "check_value", "message"]], use_container_width=True, hide_index=True)
+

@@ -61,3 +61,39 @@ def test_get_run_steps_with_unknown_id_returns_empty_dataframe():
     
     assert isinstance(result, pd.DataFrame)
     assert result.empty is True
+from src.dashboard.monitoring import (
+    get_quality_summary,
+    get_quality_failure_rates,
+    get_latest_quality_status,
+    get_quality_history,
+)
+
+
+def test_quality_summary_returns_dataframe_with_expected_metrics():
+    """ARRANGE, ACT & ASSERT: Verifies aggregate quality summary structure [INDEX]."""
+    result = get_quality_summary()
+    assert result is not None
+    assert hasattr(result, "columns")
+    if not result.empty:
+        assert "total_checks" in result.columns
+
+
+def test_quality_failure_rates_returns_dataframe_with_schema_bounds():
+    """ARRANGE, ACT & ASSERT: Verifies long-term check failure rate dimensions [INDEX]."""
+    result = get_quality_failure_rates()
+    assert result is not None
+    assert hasattr(result, "columns")
+    if not result.empty:
+        assert "check_name" in result.columns
+        assert "failure_rate_pct" in result.columns
+
+
+def test_latest_quality_status_returns_dataframe_with_window_partitions():
+    """ARRANGE, ACT & ASSERT: Verifies window-partitioned latest snapshot mapping [INDEX]."""
+    result = get_latest_quality_status()
+    assert result is not None
+    assert hasattr(result, "columns")
+    if not result.empty:
+        assert "status" in result.columns
+        assert "check_name" in result.columns
+

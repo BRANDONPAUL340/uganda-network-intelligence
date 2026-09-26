@@ -291,35 +291,7 @@ def get_available_runs() -> pd.DataFrame:
     """
     return read_query(query, "get_available_runs")
 
-@st.cache_data(ttl=15)
-def get_run_steps(run_id: int) -> pd.DataFrame:
-    """
-    7. Parameterized Sub-Stage Finder: Retrieves granular task execution logs
-    filtered exclusively by the operator's chosen Parent Run ID [INDEX].
-    """
-    query = """
-        SELECT step_id, run_id, step_name, status, records_processed, 
-               started_at, completed_at, error_message
-        FROM pipeline_steps
-        WHERE run_id = :run_id
-        ORDER BY step_id ASC;
-    """
-    return read_query(query, "get_run_steps", params={"run_id": run_id})
 
-
-@st.cache_data(ttl=15)
-def get_run_details(run_id: int) -> pd.DataFrame:
-    """
-    10. Parameterized Run Details Loader: Retrieves top-level batch metadata
-    for a single selected run execution context [INDEX].
-    """
-    query = """
-        SELECT run_id, pipeline_name, status, started_at, completed_at, 
-               records_processed, error_message
-        FROM pipeline_runs
-        WHERE run_id = :run_id;
-    """
-    return read_query(query, "get_run_details", params={"run_id": run_id})
 @st.cache_data(ttl=15)
 def get_run_step_durations(run_id: int) -> pd.DataFrame:
     """
@@ -340,6 +312,14 @@ def get_run_step_durations(run_id: int) -> pd.DataFrame:
         ORDER BY step_id ASC;
     """
     return read_query(query, "get_run_step_durations", params={"run_id": run_id})
+@st.cache_data(ttl=15)
+def get_quality_summary() -> pd.DataFrame:
+    """
+    Returns the aggregate data quality summary used by the dashboard.
+    This is a compatibility wrapper around get_quality_run_summary().
+    """
+    return get_quality_run_summary()
+
 @st.cache_data(ttl=15)
 def get_quality_failure_rates() -> pd.DataFrame:
     """
@@ -364,12 +344,17 @@ def get_latest_quality_status() -> pd.DataFrame:
     the absolute latest status snapshot entry for every unique quality check [INDEX].
     """
     query = """
-        SELECT check_name, status, check_value, failed_records, checked_at
+        SELECT
+    check_name,
+    status,
+    failure_rate_pct AS check_value,
+    failed_records,
+    checked_at
         FROM (
             SELECT dqr.*,
                    ROW_NUMBER() OVER (
                        PARTITION BY check_name 
-                       ORDER BY checked_at DESC, quality_id DESC
+                       ORDER BY checked_at DESC, quality_result_id DESC
                    ) AS rn
             FROM data_quality_results dqr
         ) x
@@ -395,3 +380,123 @@ def get_quality_run_summary() -> pd.DataFrame:
         ORDER BY run_id DESC;
     """
     return read_query(query, "get_quality_run_summary")
+
+
+
+@st.cache_data(ttl=15)
+def get_quality_history() -> pd.DataFrame:
+    """
+    7. Chronological Quality History Log: Pulls a rolling chronological 
+    timeline list of all logged quality metrics across pipeline executions [INDEX].
+    """
+    query = """
+        SELECT
+            run_id,
+            check_name,
+            status,
+            check_value,
+            failed_records,
+            checked_at
+        FROM data_quality_results
+        ORDER BY checked_at ASC;
+    """
+    return read_query(query, "get_quality_history")
+
+@st.cache_data(ttl=15)
+def get_run_details(run_id: int) -> pd.DataFrame:
+    """
+    7. Parameterized Run Details: Extracts top-level execution summary metadata 
+    for a single selected run execution context [INDEX].
+    """
+    query = """
+        SELECT run_id, pipeline_name, status, started_at, completed_at, 
+               records_processed, error_message
+        FROM pipeline_runs
+        WHERE run_id = :run_id;
+    """
+    return read_query(query, "get_run_details", params={"run_id": run_id})
+
+
+@st.cache_data(ttl=15)
+def get_run_steps(run_id: int) -> pd.DataFrame:
+    """
+    8. Parameterized Step Selector: Retrieves granular sub-stage task runtime entries 
+    and log parameters matching the operator's chosen Parent Run ID [INDEX].
+    """
+    query = """
+        SELECT step_id, run_id, step_name, status, records_processed, 
+               started_at, completed_at, error_message
+        FROM pipeline_steps
+        WHERE run_id = :run_id
+        ORDER BY step_id ASC;
+    """
+    return read_query(query, "get_run_steps", params={"run_id": run_id})
+@st.cache_data(ttl=15)
+def get_run_quality(run_id: int) -> pd.DataFrame:
+    """
+    9. Parameterized Run Quality: Extracts data quality validation scores, 
+    actual values, and messages filtered exclusively by a chosen Run ID [INDEX].
+    """
+    query = """
+        SELECT
+            quality_id,
+            run_id,
+            check_name,
+            status,
+            records_checked,
+            failed_records,
+            check_value,
+            message,
+            checked_at
+        FROM data_quality_results
+        WHERE run_id = :run_id
+        ORDER BY quality_id ASC;
+    """
+    return read_query(query, "get_run_quality", params={"run_id": run_id})
+
+@st.cache_data(ttl=15)
+def get_open_incidents() -> pd.DataFrame:
+    """
+    12 & 21. Open Incidents Finder: Retrieves all outstanding, unresolved tickets 
+    from pipeline_incidents to populate the interactive command center [INDEX].
+    """
+    query = """
+        SELECT incident_id, run_id, check_name, severity, status, message, created_at
+        FROM pipeline_incidents
+        WHERE status = 'OPEN'
+        ORDER BY created_at DESC;
+    """
+    return read_query(query, "get_open_incidents")
+
+
+@st.cache_data(ttl=15)
+def get_incident_mttr_metrics() -> pd.DataFrame:
+    """
+    19. MTTR Aggregator: Employs database interval math to compute the mean time 
+    to resolution across all closed engineering incidents [INDEX].
+    """
+    query = """
+        SELECT 
+            COUNT(*) AS resolved_count,
+            AVG(resolved_at - created_at) AS raw_average_time,
+            EXTRACT(EPOCH FROM AVG(resolved_at - created_at)) / 60.0 AS avg_resolution_minutes
+        FROM pipeline_incidents
+        WHERE resolved_at IS NOT NULL;
+    """
+    return read_query(query, "get_incident_mttr_metrics")
+
+
+@st.cache_data(ttl=15)
+def get_run_incidents(run_id: int) -> pd.DataFrame:
+    """
+    21. Parameterized Incident Drill-Down: Extracts issues linked specifically 
+    to an operator's selected parent run context ID [INDEX].
+    """
+    query = """
+        SELECT incident_id, check_name, severity, status, message, created_at, resolved_at
+        FROM pipeline_incidents
+        WHERE run_id = :run_id
+        ORDER BY incident_id ASC;
+    """
+    return read_query(query, "get_run_incidents", params={"run_id": run_id})
+
