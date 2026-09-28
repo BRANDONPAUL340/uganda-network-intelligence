@@ -569,3 +569,35 @@ def get_incident_notifications(incident_id: int) -> pd.DataFrame:
         ORDER BY notification_id DESC;
     """
     return read_query(query, "get_incident_notifications", params={"incident_id": incident_id})
+
+@st.cache_data(ttl=15)
+def get_failed_events_queue(consumer_name: str = "incident_consumer") -> pd.DataFrame:
+    """
+    15 & 19. Dead-Letter Queue Extractor: Retrieves all failed processing attempts 
+    for a targeted consumer family to populate the active visual recovery deck [INDEX].
+    """
+    query = """
+        SELECT ep.event_id, pes.event_type, pes.run_id, ep.attempt_count, 
+               ep.error_message, ep.last_attempt_at
+        FROM event_processing ep
+        JOIN pipeline_event_store pes ON ep.event_id = pes.event_id
+        WHERE ep.status = 'FAILED' AND ep.consumer_name = :consumer_name
+        ORDER BY ep.last_attempt_at DESC;
+    """
+    return read_query(query, "get_failed_events_queue", params={"consumer_name": consumer_name})
+
+
+@st.cache_data(ttl=15)
+def get_run_event_stream_ledger(run_id: int) -> pd.DataFrame:
+    """
+    19. Run-Isolated Event Stream: Fetches all historical event envelope metadata 
+    linked to a specific pipeline execution run ID to enable targeted backfills [INDEX].
+    """
+    query = """
+        SELECT event_id, event_type, event_version, producer, event_time
+        FROM pipeline_event_store
+        WHERE run_id = :run_id
+        ORDER BY event_time ASC;
+    """
+    return read_query(query, "get_run_event_stream_ledger", params={"run_id": run_id})
+

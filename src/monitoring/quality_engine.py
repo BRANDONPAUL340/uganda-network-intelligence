@@ -1,7 +1,7 @@
 
 import sys
 from pathlib import Path
-
+from src.monitoring.event_store import publish_quality_event
 from sqlalchemy import text
 
 from src.database import engine
@@ -244,43 +244,44 @@ def execute_data_quality_suite(run_id: int) -> bool:
         # range validation without changing the existing schema.
         pass
 
-    # --- CHECK #5: DATA FRESHNESS CHECK (DISABLED EXAMPLE) ---
+        # --- CHECK #5: DATA FRESHNESS CHECK (DISABLED EXAMPLE) ---
     rule_fresh = QUALITY_RULES["data_freshness"]
 
     if not rule_fresh["enabled"]:
         # 9. Skip disabled checks seamlessly [INDEX]
         pass
 
+    # ==========================================================================
+    # DYNAMIC EVENT PRODUCER EMISSION
+    # Emit quality failures into the append-only event store.
+    # ==========================================================================
+
+    if status_null == "FAIL":
+        block_pipeline = True
+
+        publish_quality_event(
+            run_id=run_id,
+            result={
+                "check_name": "null_site_id",
+                "status": "FAIL",
+                "failed_records": null_count,
+                "check_value": null_pct,
+                "message": "NULL site identifier density exceeded permitted threshold.",
+            },
+        )
+
+    if status_dup == "FAIL":
+        block_pipeline = True
+
+        publish_quality_event(
+            run_id=run_id,
+            result={
+                "check_name": "duplicate_records",
+                "status": "FAIL",
+                "failed_records": dup_groups,
+                "check_value": dup_pct,
+                "message": "Duplicate record clusters detected inside Silver tier coordinates.",
+            },
+        )
+
     return not block_pipeline
-# ==============================================================================
-# 📡 DYNAMIC EVENT PRODUCER EMISSION INTEGRATION (Day 142 Core Integration)
-# ==============================================================================
-
-
-# Inside your check evaluation loops where a status is resolved to "FAIL" [INDEX]:
-if status_null == "FAIL":
-    block_pipeline = True
-    # 24. Emit the fact asynchronously to your append-only Event Store ledger table [INDEX]
-    publish_quality_event(
-        run_id=run_id,
-        result={
-            "check_name": "null_site_id",
-            "status": "FAIL",
-            "failed_records": null_count,
-            "check_value": null_pct,
-            "message": f"NULL site identifier density exceeded permitted threshold."
-        }
-    )
-
-if status_dup == "FAIL":
-    block_pipeline = True
-    publish_quality_event(
-        run_id=run_id,
-        result={
-            "check_name": "duplicate_records",
-            "status": "FAIL",
-            "failed_records": dup_groups,
-            "check_value": dup_pct,
-            "message": f"Duplicate record clusters detected inside Silver tier coordinates."
-        }
-    )

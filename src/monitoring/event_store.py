@@ -14,6 +14,11 @@ root_dir = str(Path(__file__).resolve().parents)
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
+MAX_RETRIES = 3
+
+# ==============================================================================
+# 🎯 CORE EVENT PRODUCER UTILITIES
+# ==============================================================================
 
 def emit_pipeline_event(event_type: str, run_id: int, producer: str, payload: dict, event_version: str = "1.0.0") -> str:
     """Assembles an immutable event envelope contract and appends it to pipeline_event_store [INDEX]."""
@@ -48,180 +53,111 @@ def emit_pipeline_event(event_type: str, run_id: int, producer: str, payload: di
             }
         )
         return event_packet["event_id"]
-def publish_quality_event(run_id: int, result: dict) -> str:
-    """
-    Publishes a quality-check failure as a standardized pipeline event.
-
-    The quality engine supplies the check result, while this wrapper
-    translates it into the event-store contract expected by consumers.
-    """
-    payload = {
-        "check_name": result["check_name"],
-        "status": result.get("status", "FAIL"),
-        "failed_records": result.get("failed_records", 0),
-        "check_value": result.get("check_value"),
-        "message": result.get(
-            "message",
-            "Quality validation rule failed."
-        ),
-        "severity": result.get("severity", "HIGH"),
-    }
-
-    return emit_pipeline_event(
-        event_type="QUALITY_CHECK_FAILED",
-        run_id=run_id,
-        producer="quality_engine",
-        payload=payload,
-    )
 
 
 def check_event_already_processed(event_id: str, consumer_name: str) -> bool:
-    """11 & 12. Idempotency Gate Checker: Inspects processing table to prevent duplicate side effects [INDEX]."""
-    query = text(
-        """
-        SELECT EXISTS (
-            SELECT 1 FROM event_processing WHERE event_id = :event_id AND consumer_name = :consumer_name
-        );
-        """
-    )
+    """Idempotency Gate Checker: Inspects the database to prevent duplicate side effects [INDEX]."""
+    query = text("SELECT EXISTS (SELECT 1 FROM event_processing WHERE event_id = :event_id AND consumer_name = :consumer_name AND status = 'PROCESSED');")
     with engine.connect() as conn:
         return bool(conn.execute(query, {"event_id": event_id, "consumer_name": consumer_name}).scalar())
 
 
-def mark_event_as_processed(event_id: str, consumer_name: str) -> None:
-    """Logs an event token token entry checkpoint to guarantee idempotency [INDEX]."""
-    query = text(
-        """
-        INSERT INTO event_processing (event_id, consumer_name, processed_at)
-        VALUES (:event_id, :consumer_name, CURRENT_TIMESTAMP);
-        """
-    )
-    with engine.begin() as conn:
-        conn.execute(query, {"event_id": event_id, "consumer_name": consumer_name})
-
-
 # ==============================================================================
-# 🎯 18 & 19. REUSABLE DOMAIN-SPECIFIC EVENT HANDLERS
+# 🎯 REGISTRY-DRIVEN EVENT ROUTER HANDLERS
 # ==============================================================================
 
-def handle_quality_failure_event(event_row, consumer_name: str) -> None:
-    """
-    25. Domain-Specific Quality Consumer Handler: Unpacks contract payloads asynchronously.
-    Routes context directly to the central incident engine using your secure deduplication gate.
-    """
-    # Parse payload dictionary cleanly regardless of backend string layout types
+def handle_quality_failure_event(connection, event_row) -> None:
+    """Decoupled Domain Handler: Leverages downstream incident deduplication for safety [INDEX]."""
     payload = event_row.payload if isinstance(event_row.payload, dict) else json.loads(event_row.payload)
-    
-    # Safely invoke your established incident deduplication gate [1]
     execute_incident_deduplication_gate(
         run_id=int(event_row.run_id),
         check_name=payload["check_name"],
         severity=payload.get("severity", "HIGH"),
-        message=payload.get("message", "Quality validation rule failed.")
+        message=payload["message"]
     )
 
-def handle_unknown_event(event_row, consumer_name: str) -> None:
-    """Graceful Fallback: Logs unexpected event variations cleanly without crashing worker loops [INDEX]."""
-    print(f"⚠️ Skipped unknown or unmapped event schema type: '{event_row.event_type}' (ID: {event_row.event_id})")
+def handle_unknown_event(connection, event_row) -> None:
+    """Graceful Fallback: Captures unmapped events without throwing fatal thread exceptions [INDEX]."""
+    print(f"⚠️ Skipped unmapped or unknown event type: '{event_row.event_type}'")
 
-
-# 19. Centralised Event Routing Lookup Matrix [INDEX]
 EVENT_HANDLERS_REGISTRY = {
     "QUALITY_CHECK_FAILED": handle_quality_failure_event
 }
 
 
-def consume_event_store_stream(consumer_name: str = "incident_consumer") -> int:
+# ==============================================================================
+# 🔄 14, 15 & 18. ATOMIC REPLAY, BACKFILL & BATCH PROCESSING RECOVERY ENGINE
+# ==============================================================================
+
+def replay_event_atomically(event_id: str, consumer_name: str) -> bool:
     """
-    15 & 19. Master Event Router Loop: Polls append-only tables chronologically,
-    checks idempotency firewalls, and dispatches to registered handler maps [INDEX].
+    14 & 17. Atomic Event Replay Tool: Pulls an immutable historical record 
+    and executes processing workflows inside an isolated transactional block [INDEX].
     """
-    query = text("SELECT event_id, event_type, run_id, payload FROM pipeline_event_store ORDER BY event_time ASC;")
-    processed_count = 0
-    
+    # 16. The original event remains a permanent historical record; we never DELETE it [INDEX]
+    select_evt = text("SELECT event_id, event_type, run_id, payload FROM pipeline_event_store WHERE event_id = :event_id;")
     with engine.connect() as conn:
-        events = conn.execute(query).fetchall()
+        evt = conn.execute(select_evt, {"event_id": event_id}).fetchone()
         
-    for evt in events:
-        evt_id = str(evt.event_id)
+    if not evt:
+        print(f"❌ Event ID '{event_id}' not found in the append-only store.")
+        return False
         
-        # 15. Idempotency Firewall Gate [INDEX]
-        if check_event_already_processed(evt_id, consumer_name):
-            continue
+    # 14. Coordinate multi-table side effects within a single PostgreSQL transaction boundary [INDEX]
+    with engine.begin() as txn_conn:
+        try:
+            # Execute business logic route
+            handler = EVENT_HANDLERS_REGISTRY.get(evt.event_type, handle_unknown_event)
+            handler(txn_conn, evt)
             
-        # 19. Extract matching handler function route cleanly from dictionary registry [INDEX]
-        handler = EVENT_HANDLERS_REGISTRY.get(evt.event_type, handle_unknown_event)
-        
-        # Execute processing logic asynchronously [INDEX]
-        handler(evt, consumer_name)
-        
-        # Lock down transaction state checkpoint token [INDEX]
-        mark_event_as_processed(evt_id, consumer_name)
-        processed_count += 1
-        
-    return processed_count
+            # Mark event checkpoint as successfully PROCESSED inside the same transaction context [INDEX]
+            checkpoint_query = text(
+                """
+                INSERT INTO event_processing (event_id, consumer_name, status, attempt_count, error_message, processed_at, last_attempt_at)
+                VALUES (:event_id, :consumer_name, 'PROCESSED', 1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT (event_id, consumer_name) DO UPDATE 
+                SET status = 'PROCESSED', attempt_count = event_processing.attempt_count + 1, error_message = NULL, last_attempt_at = CURRENT_TIMESTAMP;
+                """
+            )
+            txn_conn.execute(checkpoint_query, {"event_id": event_id, "consumer_name": consumer_name})
+            return True
+            
+        except Exception as exc:
+            # If processing hits an error, log a FAILED checkpoint state to the dead-letter tracking queue [INDEX]
+            fail_query = text(
+                """
+                INSERT INTO event_processing (event_id, consumer_name, status, attempt_count, error_message, last_attempt_at)
+                VALUES (:event_id, :consumer_name, 'FAILED', 1, :err, CURRENT_TIMESTAMP)
+                ON CONFLICT (event_id, consumer_name) DO UPDATE 
+                SET status = 'FAILED', attempt_count = event_processing.attempt_count + 1, error_message = :err, last_attempt_at = CURRENT_TIMESTAMP;
+                """
+            )
+            txn_conn.execute(fail_query, {"event_id": event_id, "consumer_name": consumer_name, "err": str(exc)})
+            print(f"⚠️ Replay processing cycle hit an exception. Logged to dead-letter log: {exc}")
+            return False
 
 
-def delete_processing_checkpoint(event_id: str, consumer_name: str) -> None:
+def replay_failed_events(consumer_name: str) -> list:
     """
-    Clears an event's processing state for a single target consumer worker.
-    This opens the idempotency gate, priming the event for an intentional replay pass.
+    15 & 18. Batch Replay Dead-Letter Worker: Discovers dead-lettered FAILED alerts, 
+    and iterates chronologically to re-run recovery attempts [INDEX].
     """
     query = text(
         """
-        DELETE FROM event_processing 
-        WHERE event_id = :event_id AND consumer_name = :consumer_name;
+        SELECT event_id 
+        FROM event_processing 
+        WHERE status = 'FAILED' AND consumer_name = :consumer_name
+        ORDER BY last_attempt_at ASC;
         """
     )
-    with engine.begin() as conn:
-        conn.execute(query, {"event_id": event_id, "consumer_name": consumer_name})
-        print(f"🔄 Checkpoint cleared for Event ID: {event_id} [{consumer_name}]. Ready for replay [1].")
-
-
-def force_replay_specific_event(event_id: str, consumer_name: str = "incident_consumer") -> bool:
-    """
-    Extracts a single targeted historical event by its unique UUID token,
-    clears its processed state, and forces it back through the Event Router registry.
-    """
-    # 1. Erase the historical idempotency checkpoint lock row [1]
-    delete_processing_checkpoint(event_id, consumer_name)
-    
-    # 2. Extract the event context from the immutable store [1]
-    query = text("SELECT event_id, event_type, run_id, payload FROM pipeline_event_store WHERE event_id = :event_id;")
     with engine.connect() as conn:
-        evt = conn.execute(query, {"event_id": event_id}).fetchone()
+        failed_rows = conn.execute(query, {"consumer_name": consumer_name}).fetchall()
         
-    if not evt:
-        print(f"❌ Event ID '{event_id}' not found in the append-only event store.")
-        return False
-        
-    # 3. Force re-route the extracted event back into the handler registry loops [1]
-    handler = EVENT_HANDLERS_REGISTRY.get(evt.event_type, handle_unknown_event)
-    handler(evt, consumer_name)
-    
-    # 4. Re-lock the idempotency gate [1]
-    mark_event_as_processed(event_id, consumer_name)
-    return True
-
-
-def backfill_events_for_pipeline_run(run_id: int, consumer_name: str = "incident_consumer") -> int:
-    """
-    Consumer Backfilling: Finds every historical failure event linked to a specific 
-    pipeline run ID, clears their checkpoints, and replays them chronologically.
-    """
-    # Find all events associated with the target run_id [1]
-    find_query = text("SELECT event_id FROM pipeline_event_store WHERE run_id = :run_id;")
-    with engine.connect() as conn:
-        event_rows = conn.execute(find_query, {"run_id": run_id}).fetchall()
-        
-    replayed_count = 0
-    for row in event_rows:
+    execution_results = []
+    for row in failed_rows:
         evt_id = str(row.event_id)
-        # Force a recovery pass over each discovered event [1]
-        success = force_replay_specific_event(evt_id, consumer_name)
-        if success:
-            replayed_count += 1
-            
-    print(f"🚀 Backfill Complete: Replayed {replayed_count} events for Run #{run_id} [1].")
-    return replayed_count
-
+        # 18. Iterate and batch-replay each dead-letter event token [INDEX]
+        success_flag = replay_event_atomically(evt_id, consumer_name)
+        execution_results.append({"event_id": evt_id, "success": success_flag})
+        
+    return execution_results

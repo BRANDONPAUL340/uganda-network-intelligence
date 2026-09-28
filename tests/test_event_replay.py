@@ -1,125 +1,62 @@
-
 import pytest
 from sqlalchemy import text
-
 from src.database import engine
 from src.monitoring.event_store import (
-    publish_quality_event,
-    consume_event_store_stream,
-    force_replay_specific_event,
-    backfill_events_for_pipeline_run,
+    emit_pipeline_event,
+    replay_event_atomically,
+    replay_failed_events
 )
 
-
-@pytest.fixture
-def pipeline_run_id():
-    """
-    Create an isolated completed pipeline run for each test.
-    """
+@pytest.fixture(autouse=True)
+def clean_event_and_processing_ledgers():
+    """Resets the event store, processing matrix, and pipeline incident tables before each test pass [INDEX]."""
     with engine.begin() as conn:
-        run_id = conn.execute(
-            text(
-                """
-                INSERT INTO pipeline_runs (
-                    pipeline_name,
-                    status
-                )
-                VALUES (
-                    'event_replay_test',
-                    'COMPLETED'
-                )
-                RETURNING run_id;
-                """
-            )
-        ).scalar_one()
-
-    return run_id
+        conn.execute(text("TRUNCATE TABLE pipeline_event_store RESTART IDENTITY CASCADE;"))
+        conn.execute(text("TRUNCATE TABLE event_processing RESTART IDENTITY CASCADE;"))
+        conn.execute(text("TRUNCATE TABLE pipeline_incidents RESTART IDENTITY CASCADE;"))
+    yield
 
 
-@pytest.fixture
-def quality_event_result():
-    """
-    Standard quality-check result used by the event-store tests.
-    """
-    return {
-        "check_name": "null_site_id",
-        "status": "FAIL",
-        "failed_records": 8,
-        "message": "Null keys found.",
-    }
+def test_missing_event_id_is_handled_safely_without_crashing():
+    """Asserts that trying to replay a non-existent event ID returns False gracefully instead of crashing [INDEX]."""
+    assert replay_event_atomically("00000000-0000-0000-0000-000000000000", consumer_name="incident_consumer") is False
 
 
-def test_publish_quality_event_creates_event(
-    pipeline_run_id,
-    quality_event_result,
-):
-    """
-    Verify that publish_quality_event successfully creates
-    and returns a historical event identifier.
-    """
-    event_id = publish_quality_event(
-        run_id=pipeline_run_id,
-        result=quality_event_result,
+def test_successful_replay_transitions_state_to_processed():
+    """Asserts that a successful atomic replay updates the checkpoint status to PROCESSED inside the matrix [INDEX]."""
+    evt_id = emit_pipeline_event(
+        event_type="QUALITY_CHECK_FAILED", run_id=161, producer="test_producer",
+        payload={"check_name": "volume_check", "message": "Volume breached"}
     )
+    
+    # Execute atomic replay pass [INDEX]
+    assert replay_event_atomically(evt_id, consumer_name="incident_consumer") is True
+    
+    with engine.connect() as conn:
+        status = conn.execute(
+            text("SELECT status FROM event_processing WHERE event_id = :evt_id;"), {"evt_id": evt_id}
+        ).scalar()
+        assert status == "PROCESSED"
 
-    assert event_id is not None
 
-
-def test_consume_event_store_stream_returns_events(
-    pipeline_run_id,
-    quality_event_result,
-):
-    """
-    Verify that the event-store consumer can read published events.
-    """
-    event_id = publish_quality_event(
-        run_id=pipeline_run_id,
-        result=quality_event_result,
+def test_batch_replay_pulls_and_reprocesses_failed_dead_letter_events():
+    """Asserts that batch recovery workers extract and reprocess dead-lettered FAILED entries [INDEX]."""
+    evt_id = emit_pipeline_event(
+        event_type="QUALITY_CHECK_FAILED", run_id=161, producer="test_producer",
+        payload={"check_name": "null_site_id", "message": "Null site ID found"}
     )
-
-    assert event_id is not None
-
-    events = consume_event_store_stream()
-
-    assert events is not None
-
-
-def test_force_replay_reprocesses_historical_event_successfully(
-    pipeline_run_id,
-    quality_event_result,
-):
-    """
-    Verify that a historical event can be explicitly replayed.
-    """
-    event_id = publish_quality_event(
-        run_id=pipeline_run_id,
-        result=quality_event_result,
-    )
-
-    assert event_id is not None
-
-    replay_result = force_replay_specific_event(event_id)
-
-    assert replay_result is not None
-
-
-def test_backfill_events_for_pipeline_run_completes_successfully(
-    pipeline_run_id,
-    quality_event_result,
-):
-    """
-    Verify that historical events associated with a pipeline run
-    can be backfilled successfully.
-    """
-    event_id = publish_quality_event(
-        run_id=pipeline_run_id,
-        result=quality_event_result,
-    )
-
-    assert event_id is not None
-
-    backfill_result = backfill_events_for_pipeline_run(
-        pipeline_run_id
-    )
-
-    assert backfill_result is not None
+    
+    # ARRANGE: Simulate a pre-existing dead-letter failure row in event_processing [INDEX]
+    with engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO event_processing (event_id, consumer_name, status, attempt_count, error_message) VALUES (:evt_id, 'incident_consumer', 'FAILED', 1, 'Mock network exception');"),
+            {"evt_id": evt_id}
+        )
+        
+    # ACT: Invoke the batch dead-letter recovery worker loop [INDEX]
+    results = replay_failed_events(consumer_name="incident_consumer")
+    
+    # ASSERT: The dead-letter event was pulled and re-run successfully [INDEX]
+    assert len(results) == 1
+    assert results[0]["event_id"] == evt_id
+    assert results[0]["success"] is True
