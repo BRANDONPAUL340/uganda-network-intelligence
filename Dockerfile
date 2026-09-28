@@ -7,7 +7,7 @@ WORKDIR /app
 # 🔒 3. Harden Python execution configurations
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-
+ENV PYTHONPATH=/app
 # 📦 4. Unpack and layer platform dependencies (Optimized to skip redundant pip updates)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

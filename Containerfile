@@ -3,10 +3,9 @@ FROM python:3.14-slim
 
 WORKDIR /app
 
-# Prevent Python from writing debug pyc files to disk storage
 ENV PYTHONDONTWRITEBYTECODE=1
-# Force unbuffered standard output for clean container streaming telemetry logs
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
 
 COPY requirements.txt .
 

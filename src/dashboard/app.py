@@ -777,12 +777,6 @@ if selected_run_id:
 # ==============================================================================
 # 🕵️‍♂️ UNIFIED ROOT-CAUSE DRILL-DOWN COCKPIT (Day 133 Interface Layout)
 # ==============================================================================
-from src.dashboard.monitoring import (
-    get_available_runs,
-    get_run_details,
-    get_run_steps,
-    get_run_quality
-)
 
 st.markdown("---")
 st.header("🕵️‍♂️ Granular Ingestion Run Traceability Engine")
@@ -943,11 +937,6 @@ else:
 st.markdown("---")
 st.header("🚨 Incident Command Center & Operational Alerting")
 
-from src.dashboard.monitoring import (
-    get_open_incident_count,
-    get_open_incidents_by_severity,
-    get_open_incidents
-)
 
 try:
     open_count = get_open_incident_count()
@@ -1005,3 +994,45 @@ if open_incidents_list_df is not None and not open_incidents_list_df.empty:
         open_incidents_list_df[["incident_id", "run_id", "check_name", "severity", "message", "created_at"]],
         use_container_width=True, hide_index=True
     )
+
+    # Fetch the communication logs dataframe downstream parameterised by your choice [INDEX]
+    from src.dashboard.monitoring import get_incident_notifications
+
+    # Locate your select_run_id / active incidents display block and add:
+    run_incidents_query = "SELECT incident_id FROM pipeline_incidents WHERE run_id = :run_id LIMIT 1;"
+
+    # Assuming you pull the incident_id linked to the chosen run:
+    with engine.connect() as conn:
+        active_inc_id = conn.execute(
+            text(run_incidents_query),
+            {"run_id": selected_run_id}
+        ).scalar()
+
+    # Update your st.tabs instantiation line:
+    tab_steps, tab_quality, tab_notifs = st.tabs(
+        ["⚙️ Pipeline Steps", "🎯 Quality Checks", "🔔 Notification History"]
+    )
+
+    with tab_notifs:
+        st.markdown(f"#### 🔔 Alert Dispatch History Log — Run #{selected_run_id}")
+        if not active_inc_id:
+            st.success("✅ **Zero Alerts Dispatched:** No operational failures occurred, so no alerts were sent.")
+        else:
+            notif_history_df = get_incident_notifications(int(active_inc_id))
+            if notif_history_df.empty:
+                st.info("No alert dispatch snapshots logged for this specific incident context.")
+            else:
+                st.dataframe(
+                    notif_history_df[
+                        [
+                            "notification_id",
+                            "channel",
+                            "delivery_status",
+                            "recipient",
+                            "dispatched_at",
+                            "error_message",
+                        ]
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                )

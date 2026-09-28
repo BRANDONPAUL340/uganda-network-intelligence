@@ -1,0 +1,57 @@
+================================================================================
+UGANDA NETWORK INTELLIGENCE PLATFORM — DATA ENGINEERING EVENT CONTRACT SPECS
+================================================================================
+
+1. PIPELINE_STARTED
+   - Meaning  : A new automated batch extraction and ingestion sequence has initialized.
+   - Producer : pipeline_runner
+   - Consumer : monitoring_system, dashboard
+   - Payload  : {"pipeline_name": VARCHAR, "triggered_by": VARCHAR}
+
+2. PIPELINE_COMPLETED
+   - Meaning  : All internal sequential stages finished processing with no technical crashes.
+   - Producer : pipeline_runner
+   - Consumer : monitoring_system, metrics_aggregator
+   - Payload  : {"duration_ms": INTEGER, "total_records_processed": INTEGER}
+
+3. PIPELINE_FAILED
+   - Meaning  : An unhandled code error, infrastructure timeout, or fatal crash aborted execution.
+   - Producer : pipeline_runner
+   - Consumer : incident_manager, notification_worker
+   - Payload  : {"failed_step": VARCHAR, "error_trace": TEXT}
+
+4. QUALITY_CHECK_PASSED
+   - Meaning  : A target data table satisfies all configured policy boundary thresholds.
+   - Producer : quality_engine
+   - Consumer : monitoring_system, dashboard
+   - Payload  : {"check_name": VARCHAR, "records_checked": INTEGER}
+
+5. QUALITY_CHECK_FAILED
+   - Meaning  : A target metric has crossed a warning or critical threshold limit.
+   - Producer : quality_engine
+   - Consumer : incident_manager, monitoring_system
+   - Payload  : {"check_name": VARCHAR, "status": VARCHAR, "failed_records": INTEGER, "check_value": NUMERIC, "message": TEXT}
+
+6. INCIDENT_CREATED
+   - Meaning  : An open, state-managed triage issue has been instantiated on disk.
+   - Producer : incident_manager
+   - Consumer : notification_worker, dashboard_alert_stream
+   - Payload  : {"incident_id": BIGINT, "check_name": VARCHAR, "severity": VARCHAR}
+
+7. INCIDENT_RESOLVED
+   - Meaning  : An engineer has successfully mitigated the underlying data quality breach.
+   - Producer : incident_manager
+   - Consumer : notification_worker, dashboard_alert_stream, mttr_tracker
+   - Payload  : {"incident_id": BIGINT, "resolved_by": VARCHAR, "resolution_time_minutes": NUMERIC}
+
+8. NOTIFICATION_SENT
+   - Meaning  : An alert has been successfully transmitted over a specific communication route.
+   - Producer : notification_worker
+   - Consumer : communication_audit_ledger
+   - Payload  : {"notification_id": BIGINT, "channel": VARCHAR, "recipient": VARCHAR, "attempt_count": INTEGER}
+
+9. NOTIFICATION_FAILED
+   - Meaning  : An alert route reached max retry limits or sustained a permanent failure.
+   - Producer : notification_worker
+   - Consumer : communication_audit_ledger, oncall_escalation_system
+   - Payload  : {"notification_id": BIGINT, "channel": VARCHAR, "error_message": TEXT, "attempt_count": INTEGER}

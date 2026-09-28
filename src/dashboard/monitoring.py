@@ -559,3 +559,13 @@ def get_incident_status_ratios() -> pd.DataFrame:
         ORDER BY status ASC;
     """
     return read_query(query, "get_incident_status_ratios")
+@st.cache_data(ttl=15)
+def get_incident_notifications(incident_id: int) -> pd.DataFrame:
+    """Pulls the communication dispatch audit history logs linked to a targeted incident [INDEX]."""
+    query = """
+        SELECT notification_id, channel, delivery_status, recipient, error_message, dispatched_at
+        FROM pipeline_notification_logs
+        WHERE incident_id = :incident_id
+        ORDER BY notification_id DESC;
+    """
+    return read_query(query, "get_incident_notifications", params={"incident_id": incident_id})
