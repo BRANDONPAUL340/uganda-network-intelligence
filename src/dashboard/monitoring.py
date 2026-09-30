@@ -714,3 +714,49 @@ def get_worker_nodes_heartbeat_ledger() -> pd.DataFrame:
     """
     return read_query(query, "get_worker_nodes_heartbeat_ledger")
 
+
+@st.cache_data(ttl=5)
+def get_detailed_event_lag_and_retry_metrics() -> pd.DataFrame:
+    """
+    7 & 8. Advanced Telemetry Loader: Computes historical retry activity totals 
+    alongside average queue lag times and oldest pending landmarks [INDEX].
+    """
+    query = """
+        SELECT 
+            COALESCE(SUM(ep.attempt_count - 1), 0) AS total_retry_events,
+            MIN(pes.event_time) AS oldest_pending_event_time,
+            EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - MIN(pes.event_time))) AS max_lag_seconds,
+            EXTRACT(EPOCH FROM AVG(CURRENT_TIMESTAMP - pes.event_time)) AS avg_lag_seconds
+        FROM pipeline_event_store pes
+        JOIN event_processing ep ON pes.event_id = ep.event_id
+        WHERE ep.status IN ('PENDING', 'RETRY', 'PROCESSING');
+    """
+    return read_query(query, "get_detailed_event_lag_and_retry_metrics")
+@st.cache_data(ttl=5)
+def get_unified_event_processing_telemetry() -> pd.DataFrame:
+    """
+    14, 17 & 21. Defensive Ingestion Metrics Loader: Collects all lifecycle counts 
+    and handles empty system catalog tables safely without raising a ZeroDivisionError [INDEX].
+    """
+    query = """
+        SELECT
+            COUNT(*) AS total_records,
+            COALESCE(COUNT(*) FILTER (WHERE status = 'PENDING'), 0) AS pending,
+            COALESCE(COUNT(*) FILTER (WHERE status = 'PROCESSING'), 0) AS processing,
+            COALESCE(COUNT(*) FILTER (WHERE status = 'PROCESSED'), 0) AS processed,
+            COALESCE(COUNT(*) FILTER (WHERE status = 'RETRY'), 0) AS retry,
+            COALESCE(COUNT(*) FILTER (WHERE status = 'FAILED'), 0) AS failed,
+            -- Secure division-by-zero shield via NULLIF constraints [INDEX]
+            ROUND(
+                100.0 * COALESCE(COUNT(*) FILTER (WHERE status = 'FAILED'), 0) / 
+                NULLIF(COUNT(*), 0), 
+                2
+            ) AS failure_rate_pct,
+            COALESCE(
+                COUNT(*) FILTER (WHERE status = 'PROCESSED') / 
+                NULLIF(EXTRACT(EPOCH FROM SUM(processed_at - last_attempt_at) FILTER (WHERE status = 'PROCESSED')), 0),
+                0.0
+            ) AS processed_per_second
+        FROM event_processing;
+    """
+    return read_query(query, "get_unified_event_processing_telemetry")

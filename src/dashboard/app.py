@@ -1038,79 +1038,99 @@ if open_incidents_list_df is not None and not open_incidents_list_df.empty:
                 )
 
 # ==============================================================================
-# 🎛️ CONTAINER LAYER: Event Processing Observability & Worker Monitoring (Day 148)
+# 🎛️ CONTAINER LAYER: Event Processing Observability & Worker Monitoring (Day 148 Final)
 # ==============================================================================
 st.markdown("---")
-st.header("🎛️ Asynchronous Event Processing & Worker Observability")
+st.header("🎛️ Event Processing & Worker Telemetry Cockpit")
 
 from src.dashboard.monitoring import (
-    get_event_processing_summary_metrics,
-    get_event_processing_status_breakdown,
-    get_worker_nodes_heartbeat_ledger
+    get_unified_event_processing_telemetry,
+    get_worker_nodes_heartbeat_ledger,
+    get_detailed_event_lag_and_retry_metrics
 )
 
 try:
-    event_summary_df = get_event_processing_summary_metrics()
-    status_breakdown_df = get_event_processing_status_breakdown()
+    telemetry_df = get_unified_event_processing_telemetry()
     worker_health_df = get_worker_nodes_heartbeat_ledger()
+    lag_metrics_df = get_detailed_event_lag_and_retry_metrics()
 except Exception as exc:
     st.error(f"Operational error loading event observability subsystems: {exc}")
     st.stop()
 
-# --- UI TIER 1: CORE TELEMETRY METRIC BLOCKS ---
-if not event_summary_df.empty:
-    summary = event_summary_df.iloc[0]
-    backlog_count = int(summary.get("pending_backlog") or 0)
-    fail_rate = float(summary.get("failure_rate_pct") or 0.0)
+# Unpack single-pass telemetry metrics safely [INDEX]
+pending_count = 0
+processing_count = 0
+failed_count = 0
+processed_count = 0
+throughput_eps = 0.0
+failure_rate = 0.0
+
+if not telemetry_df.empty:
+    t_row = telemetry_df.iloc[0]
+    pending_count = int(t_row.get("pending") or 0) + int(t_row.get("retry") or 0)
+    processing_count = int(t_row.get("processing") or 0)
+    failed_count = int(t_row.get("failed") or 0)
+    processed_count = int(t_row.get("processed") or 0)
+    throughput_eps = float(t_row.get("processed_per_second") or 0.0)
     
-    col_ev1, col_ev2, col_ev3 = st.columns(3)
-    with col_ev1:
-        st.metric(
-            label="Pending Event Backlog Queue", 
-            value=backlog_count,
-            delta="⚠️ Queue Congestion" if backlog_count > 10 else "✨ Queue Healthy",
-            delta_color="inverse" if backlog_count > 10 else "normal"
-        )
-    with col_ev2:
-        st.metric(
-            label="Consumer Failure Rate Percentage", 
-            value=f"{fail_rate:.2f}%",
-            delta="🔥 Critical Faults" if fail_rate > 5.0 else "Stable",
-            delta_color="inverse" if fail_rate > 5.0 else "normal"
-        )
-    with col_ev3:
-        st.metric(
-            label="Successfully Handled Events", 
-            value=int(summary.get("processed") or 0)
-        )
+    total = int(t_row.get("total_records") or 0)
+    if total > 0:
+        failure_rate = (failed_count / total) * 100.0
 
-# --- UI TIER 2: WORKER HEALTH & CLUSTER STATUS ---
-st.markdown("---")
-tab_workers, tab_status = st.tabs(["🤖 Distributed Worker Health", "📊 Processing Status Grid"])
+# Extract max age lag landmark safely [INDEX]
+max_lag_desc = "0s"
+if not lag_metrics_df.empty:
+    max_seconds = float(lag_metrics_df.iloc[0].get("max_lag_seconds") or 0.0)
+    max_lag_desc = f"{max_seconds/60.0:.1f} min" if max_seconds > 60 else f"{max_seconds:.0f}s"
 
-with tab_workers:
-    st.subheader("🤖 Live Distributed Consumer Node Heartbeats")
-    if worker_health_df.empty:
-        st.info("No active worker node daemon heartbeats logged inside system catalogs.")
-    else:
-        # Dynamic threshold verification: flag worker nodes as STALE if age > 15 seconds [INDEX]
-        worker_health_df["Node Status"] = worker_health_df.apply(
-            lambda r: "🔴 STALE / DOWN" if r["heartbeat_age_seconds"] > 15 else "🟢 ACTIVE / RUNNING", axis=1
-        )
-        st.dataframe(
-            worker_health_df[["worker_id", "status", "Node Status", "heartbeat_age_seconds", "events_processed", "errors_count"]],
-            use_container_width=True,
-            hide_index=True
-        )
-        st.caption("Real-time cluster tracking matrix. Workers advertise their operational states periodically.")
+# --- 16. STREAMLIT METRICS GRID TIER ---
+col1, col2, col3, col4 = st.columns(4)
 
-with tab_status:
-    st.subheader("📊 Processing State Segment Distribution")
-    if status_breakdown_df.empty:
-        st.success("✅ Clean Slate: No event logs found inside processing matrices.")
-    else:
-        st.dataframe(
-            status_breakdown_df,
-            use_container_width=True,
-            hide_index=True
-        )
+with col1:
+    st.metric(
+        label="Pending Backlog Queue", 
+        value=pending_count,
+        delta="⚠️ Queue Congestion" if pending_count > 10 else "✨ Queue Healthy",
+        delta_color="inverse" if pending_count > 10 else "normal"
+    )
+
+with col2:
+    st.metric(
+        label="In-Flight Processing", 
+        value=processing_count
+    )
+
+with col3:
+    st.metric(
+        label="Failed / Dead-Lettered", 
+        value=failed_count,
+        delta=f"{failure_rate:.1f}% Fail Rate" if failed_count > 0 else None,
+        delta_color="inverse"
+    )
+
+with col4:
+    st.metric(
+        label="Oldest Pending Age", 
+        value=max_lag_desc
+    )
+
+# Secondary Performance & Throughput Row Panel
+col_perf1, col_perf2 = st.columns(2)
+with col_perf1:
+    st.metric(label="Total Handled Events", value=processed_count)
+with col_perf2:
+    st.metric(label="Consumer Processing Throughput", value=f"{throughput_eps:.2f} eps")
+
+# --- WORKER CLUSTER HEARTBEATS DISPLAY PANEL ---
+st.markdown("#### 🤖 Distributed Consumer Cluster Nodes")
+if worker_health_df.empty:
+    st.info("No active worker node daemon heartbeats logged inside system catalogs.")
+else:
+    worker_health_df["Cluster Status"] = worker_health_df.apply(
+        lambda r: "🔴 STALE / DOWN" if r["heartbeat_age_seconds"] > 15 else "🟢 ACTIVE / RUNNING", axis=1
+    )
+    st.dataframe(
+        worker_health_df[["worker_id", "status", "Cluster Status", "heartbeat_age_seconds", "events_processed", "errors_count"]],
+        use_container_width=True,
+        hide_index=True
+    )
