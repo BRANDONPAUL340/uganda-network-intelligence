@@ -17,11 +17,30 @@ if root_dir not in sys.path:
 MAX_RETRIES = 3
 
 # ==============================================================================
+# 🎯 21. EXPLICIT COMPATIBILITY POLICY MATRIX
+# ==============================================================================
+SUPPORTED_VERSIONS = {
+    "QUALITY_CHECK_FAILED": {"1", "1.0.0", "2", "2.0.0"}
+}
+
+
+def is_supported_event(event_type: str, event_version: str) -> bool:
+    """21. Compatibility Gate: Asserts whether a schema contract version is supported [INDEX]."""
+    versions = SUPPORTED_VERSIONS.get(event_type, set())
+    return str(event_version) in versions
+
+
+# ==============================================================================
 # 🎯 CORE EVENT PRODUCER UTILITIES
 # ==============================================================================
 
-def emit_pipeline_event(event_type: str, run_id: int, producer: str, payload: dict, event_version: str = "1.0.0") -> str:
-    """Assembles an immutable event envelope contract and appends it to pipeline_event_store [INDEX]."""
+from src.monitoring.event_contract import validate_event, EventContractValidationError
+
+def emit_pipeline_event(event_type: str, run_id: int, producer: str, payload: dict, event_version: int = 1) -> str:
+    """
+    24 & 25. Producer Validation Firewall: Builds an event envelope, enforces contract checks 
+    upstream, and inserts the record into PostgreSQL ONLY if it passes validation [INDEX].
+    """
     event_packet = {
         "event_id": str(uuid.uuid4()),
         "event_type": event_type,
@@ -31,7 +50,11 @@ def emit_pipeline_event(event_type: str, run_id: int, producer: str, payload: di
         "producer": producer,
         "payload": payload
     }
-    validate_event_envelope_contract(event_packet)
+    
+    # 24 & 25. Validate contract BEFORE inserting into PostgreSQL [INDEX]
+    validation_result = validate_event(event_packet)
+    if not validation_result["valid"]:
+        raise EventContractValidationError(f"Upstream Ingestion Blocked: Malformed data payload rejected. Errors: {validation_result['errors']}")
     
     query = text(
         """
@@ -55,6 +78,7 @@ def emit_pipeline_event(event_type: str, run_id: int, producer: str, payload: di
         return event_packet["event_id"]
 
 
+
 def check_event_already_processed(event_id: str, consumer_name: str) -> bool:
     """Idempotency Gate Checker: Inspects the database to prevent duplicate side effects [INDEX]."""
     query = text("SELECT EXISTS (SELECT 1 FROM event_processing WHERE event_id = :event_id AND consumer_name = :consumer_name AND status = 'PROCESSED');")
@@ -62,8 +86,22 @@ def check_event_already_processed(event_id: str, consumer_name: str) -> bool:
         return bool(conn.execute(query, {"event_id": event_id, "consumer_name": consumer_name}).scalar())
 
 
+def mark_event_as_processed(event_id: str, consumer_name: str, status: str = "PROCESSED", error_message: str = None) -> None:
+    """Logs or updates an entry inside the event_processing ledger to guarantee idempotency [INDEX]."""
+    query = text(
+        """
+        INSERT INTO event_processing (event_id, consumer_name, status, error_message, processed_at, last_attempt_at)
+        VALUES (:event_id, :consumer_name, :status, :error_message, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (event_id, consumer_name) DO UPDATE 
+        SET status = :status, error_message = :error_message, last_attempt_at = CURRENT_TIMESTAMP;
+        """
+    )
+    with engine.begin() as conn:
+        conn.execute(query, {"event_id": event_id, "consumer_name": consumer_name, "status": status, "error_message": error_message})
+
+
 # ==============================================================================
-# 🎯 12. COMPOSITE TUPLE REGISTRY MATRIX (Day 150 Version Evolution Engine)
+# 🎯 COMPOSITE TUPLE REGISTRY HANDLERS
 # ==============================================================================
 
 def consume_quality_failure_v1(connection, event_row, payload: dict) -> None:
@@ -86,7 +124,6 @@ def consume_quality_failure_v2(connection, event_row, payload: dict) -> None:
     )
 
 
-# 12. Map complex combinations of type strings and semantic version tags [INDEX]
 COMPOSITE_VERSION_HANDLERS_REGISTRY = {
     ("QUALITY_CHECK_FAILED", "1"): consume_quality_failure_v1,
     ("QUALITY_CHECK_FAILED", "1.0.0"): consume_quality_failure_v1,
@@ -96,18 +133,19 @@ COMPOSITE_VERSION_HANDLERS_REGISTRY = {
 
 
 def handle_quality_failure_event(connection, event_row) -> None:
-    """11 & 14. Version Router Gate: Routes payloads using composite tuple lookups [INDEX]."""
+    """11, 14 & 21. Version Router Gate: Routes payloads safely via lookup policies [INDEX]."""
     payload = event_row.payload if isinstance(event_row.payload, dict) else json.loads(event_row.payload)
     version = str(event_row.event_version)
     
-    # 12. Query the composite tuple lookup matrix cleanly [INDEX]
+    # 21. Explicitly check compatibility matrix before executing consumer logic [INDEX]
+    if not is_supported_event(event_row.event_type, version):
+        raise NotImplementedError(f"Unsupported Contract Rule: Version variant '{version}' is not supported for type '{event_row.event_type}'.")
+        
     handler = COMPOSITE_VERSION_HANDLERS_REGISTRY.get((event_row.event_type, version))
-    
     if handler:
         handler(connection, event_row, payload)
     else:
-        # 14 & 15. Unsupported contract versions immediately drop out with a clear error [INDEX]
-        raise NotImplementedError(f"Unsupported Contract Rule: Version variant '{version}' is not supported for type '{event_row.event_type}'.")
+        raise ValueError(f"Contract Error: Missing specific handler for supported version variant '{version}'.")
 
 
 def handle_unknown_event(connection, event_row) -> None:
