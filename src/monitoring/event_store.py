@@ -53,13 +53,114 @@ def emit_pipeline_event(event_type: str, run_id: int, producer: str, payload: di
             }
         )
         return event_packet["event_id"]
+def publish_quality_event(run_id: int, result: dict) -> str:
+    """
+    Publishes a failed data-quality result as a QUALITY_CHECK_FAILED
+    event into the append-only pipeline event store.
+    """
+    payload = {
+        "check_name": result["check_name"],
+        "status": result.get("status", "FAIL"),
+        "failed_records": result.get("failed_records", 0),
+        "check_value": result.get("check_value"),
+        "message": result["message"],
+        "severity": result.get("severity", "HIGH"),
+    }
 
+    return emit_pipeline_event(
+        event_type="QUALITY_CHECK_FAILED",
+        run_id=run_id,
+        producer="quality_engine",
+        payload=payload,
+    )
+
+
+def consume_event_store_stream(consumer_name: str) -> int:
+    """
+    Consumes all currently unprocessed events for a consumer.
+
+    Each event is routed through the existing atomic replay engine,
+    which executes the registered handler and records the processing
+    checkpoint. Returns the number of successfully processed events.
+    """
+    query = text(
+        """
+        SELECT pes.event_id
+        FROM pipeline_event_store pes
+        LEFT JOIN event_processing ep
+            ON ep.event_id = pes.event_id
+           AND ep.consumer_name = :consumer_name
+        WHERE ep.event_id IS NULL
+           OR ep.status <> 'PROCESSED'
+        ORDER BY pes.event_time ASC;
+        """
+    )
+
+    with engine.connect() as conn:
+        rows = conn.execute(
+            query,
+            {"consumer_name": consumer_name},
+        ).fetchall()
+
+    processed_count = 0
+
+    for row in rows:
+        event_id = str(row.event_id)
+
+        if replay_event_atomically(
+            event_id=event_id,
+            consumer_name=consumer_name,
+        ):
+            processed_count += 1
+
+    return processed_count
 
 def check_event_already_processed(event_id: str, consumer_name: str) -> bool:
     """Idempotency Gate Checker: Inspects the database to prevent duplicate side effects [INDEX]."""
     query = text("SELECT EXISTS (SELECT 1 FROM event_processing WHERE event_id = :event_id AND consumer_name = :consumer_name AND status = 'PROCESSED');")
     with engine.connect() as conn:
         return bool(conn.execute(query, {"event_id": event_id, "consumer_name": consumer_name}).scalar())
+
+def mark_event_as_processed(event_id: str, consumer_name: str) -> None:
+    """Records a successful event-processing checkpoint for an idempotent consumer."""
+    query = text(
+        """
+        INSERT INTO event_processing (
+            event_id,
+            consumer_name,
+            status,
+            attempt_count,
+            error_message,
+            processed_at,
+            last_attempt_at
+        )
+        VALUES (
+            :event_id,
+            :consumer_name,
+            'PROCESSED',
+            1,
+            NULL,
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+        )
+        ON CONFLICT (event_id, consumer_name) DO UPDATE
+        SET
+            status = 'PROCESSED',
+            attempt_count = event_processing.attempt_count + 1,
+            error_message = NULL,
+            processed_at = CURRENT_TIMESTAMP,
+            last_attempt_at = CURRENT_TIMESTAMP;
+        """
+    )
+
+    with engine.begin() as conn:
+        conn.execute(
+            query,
+            {
+                "event_id": event_id,
+                "consumer_name": consumer_name,
+            },
+        )
 
 
 # ==============================================================================

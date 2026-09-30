@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from sqlalchemy import text
 from src.database import engine
+from sqlalchemy import text, bindparam
 
 # Dynamic project root path resolution hook
 root_dir = str(Path(__file__).resolve().parents)
@@ -90,30 +91,52 @@ def process_concurrent_event_batch(consumer_name: str, batch_size: int = 10) -> 
     reclaim_stale_worker_leases(consumer_name)
     
     cte_claim_query = text(
-        """
-        WITH claimed AS (
-            SELECT pes.event_id
-            FROM pipeline_event_store pes
-            LEFT JOIN event_processing ep 
-                ON pes.event_id = ep.event_id AND ep.consumer_name = :consumer_name
-            WHERE ep.status IS NULL 
-               OR (ep.status IN ('PENDING', 'RETRY') AND (ep.next_attempt_at IS NULL OR ep.next_attempt_at <= CURRENT_TIMESTAMP))
-            ORDER BY pes.event_time ASC
-            LIMIT :batch_size
-            FOR UPDATE SKIP LOCKED
-        )
-        INSERT INTO event_processing (event_id, consumer_name, status, attempt_count, claimed_by, claimed_at, last_attempt_at)
-        SELECT event_id, :consumer_name, 'PROCESSING', 1, :worker_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-        FROM claimed
-        ON CONFLICT (event_id, consumer_name) DO UPDATE 
-        SET status = 'PROCESSING', 
-            claimed_by = :worker_id, 
-            claimed_at = CURRENT_TIMESTAMP, 
-            attempt_count = event_processing.attempt_count + 1,
-            last_attempt_at = CURRENT_TIMESTAMP
-        RETURNING event_id;
-        """
+    """
+    WITH claimed AS (
+        SELECT pes.event_id
+        FROM pipeline_event_store pes
+        LEFT JOIN event_processing ep
+            ON pes.event_id = ep.event_id
+            AND ep.consumer_name = :consumer_name
+        WHERE ep.status IS NULL
+           OR (
+               ep.status IN ('PENDING', 'RETRY')
+               AND (
+                   ep.next_attempt_at IS NULL
+                   OR ep.next_attempt_at <= CURRENT_TIMESTAMP
+               )
+           )
+        ORDER BY pes.event_time ASC
+        LIMIT :batch_size
+        FOR UPDATE OF pes SKIP LOCKED
     )
+    INSERT INTO event_processing (
+        event_id,
+        consumer_name,
+        status,
+        attempt_count,
+        claimed_by,
+        claimed_at,
+        last_attempt_at
+    )
+    SELECT
+        event_id,
+        :consumer_name,
+        'PROCESSING',
+        1,
+        :worker_id,
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP
+    FROM claimed
+    ON CONFLICT (event_id, consumer_name) DO UPDATE
+    SET status = 'PROCESSING',
+        claimed_by = :worker_id,
+        claimed_at = CURRENT_TIMESTAMP,
+        attempt_count = event_processing.attempt_count + 1,
+        last_attempt_at = CURRENT_TIMESTAMP
+    RETURNING event_id;
+    """
+)
     
     metrics = {"received": 0, "processed": 0, "failed": 0, "skipped": 0}
     
@@ -132,48 +155,88 @@ def process_concurrent_event_batch(consumer_name: str, batch_size: int = 10) -> 
         
     from src.monitoring.event_store import EVENT_HANDLERS_REGISTRY, handle_unknown_event, check_event_already_processed
     
-    fetch_query = text("SELECT event_id, event_type, run_id, payload FROM pipeline_event_store WHERE event_id IN :ids;")
+    fetch_query = text(
+        """
+        SELECT event_id, event_type, run_id, payload
+        FROM pipeline_event_store
+        WHERE event_id IN :ids;
+        """
+    ).bindparams(bindparam("ids", expanding=True))
+
     with engine.connect() as conn:
-        claimed_events = conn.execute(fetch_query, {"ids": tuple(claimed_ids)}).fetchall()
-        
+        claimed_events = conn.execute(
+            fetch_query,
+            {"ids": list(claimed_ids)}
+        ).fetchall()
+
     for evt in claimed_events:
         evt_id = str(evt.event_id)
-        
+
         if check_event_already_processed(evt_id, consumer_name):
             metrics["skipped"] += 1
             continue
-            
+
         try:
             with engine.begin() as work_conn:
-                handler = EVENT_HANDLERS_REGISTRY.get(evt.event_type, handle_unknown_event)
+                handler = EVENT_HANDLERS_REGISTRY.get(
+                    evt.event_type,
+                    handle_unknown_event
+                )
                 handler(work_conn, evt)
-                
+
                 success_query = text(
                     """
-                    UPDATE event_processing 
-                    SET status = 'PROCESSED', processed_at = CURRENT_TIMESTAMP, claimed_by = NULL 
-                    WHERE event_id = :event_id AND consumer_name = :consumer_name;
+                    UPDATE event_processing
+                    SET status = 'PROCESSED',
+                        processed_at = CURRENT_TIMESTAMP,
+                        claimed_by = NULL
+                    WHERE event_id = :event_id
+                      AND consumer_name = :consumer_name;
                     """
                 )
-                work_conn.execute(success_query, {"event_id": evt_id, "consumer_name": consumer_name})
+
+                work_conn.execute(
+                    success_query,
+                    {
+                        "event_id": evt_id,
+                        "consumer_name": consumer_name
+                    }
+                )
+
                 metrics["processed"] += 1
-                
+
         except Exception as exc:
             with engine.begin() as fail_conn:
                 fail_query = text(
                     """
-                    UPDATE event_processing 
-                    SET status = 'FAILED', error_message = :err, claimed_by = NULL 
-                    WHERE event_id = :event_id AND consumer_name = :consumer_name;
+                    UPDATE event_processing
+                    SET status = 'FAILED',
+                        error_message = :err,
+                        claimed_by = NULL
+                    WHERE event_id = :event_id
+                      AND consumer_name = :consumer_name;
                     """
                 )
-                fail_conn.execute(fail_query, {"event_id": evt_id, "consumer_name": consumer_name, "err": str(exc)})
+
+                fail_conn.execute(
+                    fail_query,
+                    {
+                        "event_id": evt_id,
+                        "consumer_name": consumer_name,
+                        "err": str(exc)
+                    }
+                )
+
                 metrics["failed"] += 1
-                
+
     return metrics
 
-
-def run_continuous_worker_service(consumer_name: str = "incident_consumer", max_loops: int = None) -> None:
+def run_continuous_worker_service(
+    consumer_name: str = "incident_consumer",
+    poll_interval: float = None,
+    batch_size: int = None,
+    max_loops: int = None,
+) -> None:
     """
     25, 26, 27 & 31. Adaptive Continuous Worker: Polls the event store at scheduled intervals.
     Employs adaptive polling, metrics tracking, and graceful signal handlers [INDEX].
@@ -195,9 +258,9 @@ def run_continuous_worker_service(consumer_name: str = "incident_consumer", max_
         try:
             # 30. Run worker cycle once over a single batch chunk [INDEX]
             metrics = process_concurrent_event_batch(
-                consumer_name=consumer_name, 
-                batch_size=WORKER_CONFIG["batch_size"]
-            )
+    consumer_name=consumer_name,
+    batch_size=batch_size if batch_size is not None else WORKER_CONFIG["batch_size"]
+)
             
             elapsed_seconds = max(time.time() - start_time, 0.001)
             throughput = metrics["processed"] / elapsed_seconds
@@ -213,7 +276,9 @@ def run_continuous_worker_service(consumer_name: str = "incident_consumer", max_
                 print(f"⏳ [{datetime.now().strftime('%H:%M:%S')}] Cycle #{loops} | Throughput: {throughput:.1f} events/sec | Handled: {metrics['processed']} success.")
                 
             # 25. Adaptive Polling: If events were processed, poll again immediately without waiting [INDEX]
-            if metrics["received"] == WORKER_CONFIG["batch_size"] and not worker_shutdown_requested:
+            effective_batch_size = batch_size if batch_size is not None else WORKER_CONFIG["batch_size"]
+
+            if metrics["received"] == effective_batch_size and not worker_shutdown_requested:
                 continue
                 
         except Exception as exc:
@@ -222,7 +287,13 @@ def run_continuous_worker_service(consumer_name: str = "incident_consumer", max_
             
         # Standard poll interval sleep window [INDEX]
         if not worker_shutdown_requested:
-            time.sleep(WORKER_CONFIG["poll_interval_seconds"])
+           effective_poll_interval = (
+    poll_interval
+    if poll_interval is not None
+    else WORKER_CONFIG["poll_interval_seconds"]
+)
+
+    time.sleep(WORKER_CONFIG["poll_interval_seconds"])
         
     # 26 & 27. Advertise clean STOPPED state before final thread exit [INDEX]
     emit_worker_heartbeat(status="STOPPED")

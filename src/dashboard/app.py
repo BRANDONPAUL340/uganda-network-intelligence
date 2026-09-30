@@ -1036,3 +1036,81 @@ if open_incidents_list_df is not None and not open_incidents_list_df.empty:
                     use_container_width=True,
                     hide_index=True,
                 )
+
+# ==============================================================================
+# 🎛️ CONTAINER LAYER: Event Processing Observability & Worker Monitoring (Day 148)
+# ==============================================================================
+st.markdown("---")
+st.header("🎛️ Asynchronous Event Processing & Worker Observability")
+
+from src.dashboard.monitoring import (
+    get_event_processing_summary_metrics,
+    get_event_processing_status_breakdown,
+    get_worker_nodes_heartbeat_ledger
+)
+
+try:
+    event_summary_df = get_event_processing_summary_metrics()
+    status_breakdown_df = get_event_processing_status_breakdown()
+    worker_health_df = get_worker_nodes_heartbeat_ledger()
+except Exception as exc:
+    st.error(f"Operational error loading event observability subsystems: {exc}")
+    st.stop()
+
+# --- UI TIER 1: CORE TELEMETRY METRIC BLOCKS ---
+if not event_summary_df.empty:
+    summary = event_summary_df.iloc[0]
+    backlog_count = int(summary.get("pending_backlog") or 0)
+    fail_rate = float(summary.get("failure_rate_pct") or 0.0)
+    
+    col_ev1, col_ev2, col_ev3 = st.columns(3)
+    with col_ev1:
+        st.metric(
+            label="Pending Event Backlog Queue", 
+            value=backlog_count,
+            delta="⚠️ Queue Congestion" if backlog_count > 10 else "✨ Queue Healthy",
+            delta_color="inverse" if backlog_count > 10 else "normal"
+        )
+    with col_ev2:
+        st.metric(
+            label="Consumer Failure Rate Percentage", 
+            value=f"{fail_rate:.2f}%",
+            delta="🔥 Critical Faults" if fail_rate > 5.0 else "Stable",
+            delta_color="inverse" if fail_rate > 5.0 else "normal"
+        )
+    with col_ev3:
+        st.metric(
+            label="Successfully Handled Events", 
+            value=int(summary.get("processed") or 0)
+        )
+
+# --- UI TIER 2: WORKER HEALTH & CLUSTER STATUS ---
+st.markdown("---")
+tab_workers, tab_status = st.tabs(["🤖 Distributed Worker Health", "📊 Processing Status Grid"])
+
+with tab_workers:
+    st.subheader("🤖 Live Distributed Consumer Node Heartbeats")
+    if worker_health_df.empty:
+        st.info("No active worker node daemon heartbeats logged inside system catalogs.")
+    else:
+        # Dynamic threshold verification: flag worker nodes as STALE if age > 15 seconds [INDEX]
+        worker_health_df["Node Status"] = worker_health_df.apply(
+            lambda r: "🔴 STALE / DOWN" if r["heartbeat_age_seconds"] > 15 else "🟢 ACTIVE / RUNNING", axis=1
+        )
+        st.dataframe(
+            worker_health_df[["worker_id", "status", "Node Status", "heartbeat_age_seconds", "events_processed", "errors_count"]],
+            use_container_width=True,
+            hide_index=True
+        )
+        st.caption("Real-time cluster tracking matrix. Workers advertise their operational states periodically.")
+
+with tab_status:
+    st.subheader("📊 Processing State Segment Distribution")
+    if status_breakdown_df.empty:
+        st.success("✅ Clean Slate: No event logs found inside processing matrices.")
+    else:
+        st.dataframe(
+            status_breakdown_df,
+            use_container_width=True,
+            hide_index=True
+        )

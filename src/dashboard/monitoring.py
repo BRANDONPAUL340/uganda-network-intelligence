@@ -601,3 +601,116 @@ def get_run_event_stream_ledger(run_id: int) -> pd.DataFrame:
     """
     return read_query(query, "get_run_event_stream_ledger", params={"run_id": run_id})
 
+@st.cache_data(ttl=15)
+def get_event_processing_status_metrics() -> pd.DataFrame:
+    """
+    19. Processing Status Summary: Aggregates total metrics by lifecycle state 
+    from event_processing to populate dashboard counter blocks [INDEX].
+    """
+    query = """
+        SELECT status, COUNT(*) AS total
+        FROM event_processing
+        GROUP BY status
+        ORDER BY status ASC;
+    """
+    return read_query(query, "get_event_processing_status_metrics")
+
+
+@st.cache_data(ttl=15)
+def get_event_stream_lag_ledger() -> pd.DataFrame:
+    """
+    20. Event Lag Tracker: Computes the precise chronological age of events 
+    waiting in pipeline_event_store to audit background worker performance [INDEX].
+    """
+    query = """
+        SELECT event_id, event_type, event_time,
+               CURRENT_TIMESTAMP - event_time AS event_age,
+               EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - event_time)) AS lag_seconds
+        FROM pipeline_event_store
+        ORDER BY event_time DESC
+        LIMIT 20;
+    """
+    return read_query(query, "get_event_stream_lag_ledger")
+
+@st.cache_data(ttl=5)
+def get_worker_cluster_heartbeat_ledger() -> pd.DataFrame:
+    """
+    15. Worker Health Audit: Queries active worker heartbeats and computes 
+    exact age intervals to identify stale cluster nodes cleanly [INDEX].
+    """
+    query = """
+        SELECT worker_id, status, last_heartbeat_at,
+               CURRENT_TIMESTAMP - last_heartbeat_at AS heartbeat_age,
+               events_processed, errors_count
+        FROM pipeline_worker_heartbeats
+        ORDER BY last_heartbeat_at DESC;
+    """
+    return read_query(query, "get_worker_cluster_heartbeat_ledger")
+
+
+@st.cache_data(ttl=5)
+def get_active_backlog_metrics() -> pd.DataFrame:
+    """
+    17. Backlog Backpressure Tracker: Measures the absolute pending queue depth 
+    and captures the precise age of the oldest unresolved event record on disk [INDEX].
+    """
+    query = """
+        SELECT 
+            COUNT(*) AS pending_backlog_count,
+            MIN(pes.event_time) AS oldest_pending_event_time,
+            CURRENT_TIMESTAMP - MIN(pes.event_time) AS max_backlog_lag_age
+        FROM pipeline_event_store pes
+        LEFT JOIN event_processing ep ON pes.event_id = ep.event_id
+        WHERE ep.status IS NULL OR ep.status IN ('PENDING', 'RETRY');
+    """
+    return read_query(query, "get_active_backlog_metrics")
+@st.cache_data(ttl=5)
+def get_event_processing_summary_metrics() -> pd.DataFrame:
+    """
+    4, 5 & 6. Event System Observability Loader: Calculates backlog metrics, 
+    status stratifications, and transaction-safe failure rate percentages [INDEX].
+    """
+    query = """
+        SELECT 
+            COUNT(*) AS total_records,
+            COUNT(*) FILTER (WHERE status = 'PROCESSED') AS processed,
+            COUNT(*) FILTER (WHERE status = 'PROCESSING') AS processing,
+            COUNT(*) FILTER (WHERE status IN ('PENDING', 'RETRY')) AS pending_backlog,
+            COUNT(*) FILTER (WHERE status = 'FAILED') AS failed,
+            ROUND(
+                100.0 * COUNT(*) FILTER (WHERE status = 'FAILED') 
+                / NULLIF(COUNT(*), 0), 
+                2
+            ) AS failure_rate_pct
+        FROM event_processing;
+    """
+    return read_query(query, "get_event_processing_summary_metrics")
+
+
+@st.cache_data(ttl=5)
+def get_event_processing_status_breakdown() -> pd.DataFrame:
+    """5. Grouping Loader: Groups processing records by status families [INDEX]."""
+    query = """
+        SELECT status, COUNT(*) AS total
+        FROM event_processing
+        GROUP BY status
+        ORDER BY status ASC;
+    """
+    return read_query(query, "get_event_processing_status_breakdown")
+
+
+@st.cache_data(ttl=5)
+def get_worker_nodes_heartbeat_ledger() -> pd.DataFrame:
+    """
+    11 & 12. Worker Health Audit: Queries active worker heartbeats and computes 
+    exact age intervals to identify stale cluster nodes cleanly [INDEX].
+    """
+    query = """
+        SELECT worker_id, status, last_heartbeat_at,
+               EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - last_heartbeat_at)) AS heartbeat_age_seconds,
+               events_processed, errors_count
+        FROM pipeline_worker_heartbeats
+        ORDER BY last_heartbeat_at DESC;
+    """
+    return read_query(query, "get_worker_nodes_heartbeat_ledger")
+
