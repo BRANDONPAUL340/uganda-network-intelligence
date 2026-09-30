@@ -53,67 +53,7 @@ def emit_pipeline_event(event_type: str, run_id: int, producer: str, payload: di
             }
         )
         return event_packet["event_id"]
-def publish_quality_event(run_id: int, result: dict) -> str:
-    """
-    Publishes a failed data-quality result as a QUALITY_CHECK_FAILED
-    event into the append-only pipeline event store.
-    """
-    payload = {
-        "check_name": result["check_name"],
-        "status": result.get("status", "FAIL"),
-        "failed_records": result.get("failed_records", 0),
-        "check_value": result.get("check_value"),
-        "message": result["message"],
-        "severity": result.get("severity", "HIGH"),
-    }
 
-    return emit_pipeline_event(
-        event_type="QUALITY_CHECK_FAILED",
-        run_id=run_id,
-        producer="quality_engine",
-        payload=payload,
-    )
-
-
-def consume_event_store_stream(consumer_name: str) -> int:
-    """
-    Consumes all currently unprocessed events for a consumer.
-
-    Each event is routed through the existing atomic replay engine,
-    which executes the registered handler and records the processing
-    checkpoint. Returns the number of successfully processed events.
-    """
-    query = text(
-        """
-        SELECT pes.event_id
-        FROM pipeline_event_store pes
-        LEFT JOIN event_processing ep
-            ON ep.event_id = pes.event_id
-           AND ep.consumer_name = :consumer_name
-        WHERE ep.event_id IS NULL
-           OR ep.status <> 'PROCESSED'
-        ORDER BY pes.event_time ASC;
-        """
-    )
-
-    with engine.connect() as conn:
-        rows = conn.execute(
-            query,
-            {"consumer_name": consumer_name},
-        ).fetchall()
-
-    processed_count = 0
-
-    for row in rows:
-        event_id = str(row.event_id)
-
-        if replay_event_atomically(
-            event_id=event_id,
-            consumer_name=consumer_name,
-        ):
-            processed_count += 1
-
-    return processed_count
 
 def check_event_already_processed(event_id: str, consumer_name: str) -> bool:
     """Idempotency Gate Checker: Inspects the database to prevent duplicate side effects [INDEX]."""
@@ -121,65 +61,59 @@ def check_event_already_processed(event_id: str, consumer_name: str) -> bool:
     with engine.connect() as conn:
         return bool(conn.execute(query, {"event_id": event_id, "consumer_name": consumer_name}).scalar())
 
-def mark_event_as_processed(event_id: str, consumer_name: str) -> None:
-    """Records a successful event-processing checkpoint for an idempotent consumer."""
-    query = text(
-        """
-        INSERT INTO event_processing (
-            event_id,
-            consumer_name,
-            status,
-            attempt_count,
-            error_message,
-            processed_at,
-            last_attempt_at
-        )
-        VALUES (
-            :event_id,
-            :consumer_name,
-            'PROCESSED',
-            1,
-            NULL,
-            CURRENT_TIMESTAMP,
-            CURRENT_TIMESTAMP
-        )
-        ON CONFLICT (event_id, consumer_name) DO UPDATE
-        SET
-            status = 'PROCESSED',
-            attempt_count = event_processing.attempt_count + 1,
-            error_message = NULL,
-            processed_at = CURRENT_TIMESTAMP,
-            last_attempt_at = CURRENT_TIMESTAMP;
-        """
-    )
-
-    with engine.begin() as conn:
-        conn.execute(
-            query,
-            {
-                "event_id": event_id,
-                "consumer_name": consumer_name,
-            },
-        )
-
 
 # ==============================================================================
-# 🎯 REGISTRY-DRIVEN EVENT ROUTER HANDLERS
+# 🎯 12. COMPOSITE TUPLE REGISTRY MATRIX (Day 150 Version Evolution Engine)
 # ==============================================================================
 
-def handle_quality_failure_event(connection, event_row) -> None:
-    """Decoupled Domain Handler: Leverages downstream incident deduplication for safety [INDEX]."""
-    payload = event_row.payload if isinstance(event_row.payload, dict) else json.loads(event_row.payload)
+def consume_quality_failure_v1(connection, event_row, payload: dict) -> None:
+    """Handles legacy Version 1.0.0 layout contracts safely [INDEX]."""
     execute_incident_deduplication_gate(
         run_id=int(event_row.run_id),
         check_name=payload["check_name"],
-        severity=payload.get("severity", "HIGH"),
+        severity="HIGH",
         message=payload["message"]
     )
 
+
+def consume_quality_failure_v2(connection, event_row, payload: dict) -> None:
+    """Handles graduated Version 2.0.0 refactored schema contracts cleanly [INDEX]."""
+    execute_incident_deduplication_gate(
+        run_id=int(event_row.run_id),
+        check_name=payload["check"],
+        severity=payload.get("severity", "HIGH"),
+        message=payload["error_description"]
+    )
+
+
+# 12. Map complex combinations of type strings and semantic version tags [INDEX]
+COMPOSITE_VERSION_HANDLERS_REGISTRY = {
+    ("QUALITY_CHECK_FAILED", "1"): consume_quality_failure_v1,
+    ("QUALITY_CHECK_FAILED", "1.0.0"): consume_quality_failure_v1,
+    ("QUALITY_CHECK_FAILED", "2"): consume_quality_failure_v2,
+    ("QUALITY_CHECK_FAILED", "2.0.0"): consume_quality_failure_v2,
+}
+
+
+def handle_quality_failure_event(connection, event_row) -> None:
+    """11 & 14. Version Router Gate: Routes payloads using composite tuple lookups [INDEX]."""
+    payload = event_row.payload if isinstance(event_row.payload, dict) else json.loads(event_row.payload)
+    version = str(event_row.event_version)
+    
+    # 12. Query the composite tuple lookup matrix cleanly [INDEX]
+    handler = COMPOSITE_VERSION_HANDLERS_REGISTRY.get((event_row.event_type, version))
+    
+    if handler:
+        handler(connection, event_row, payload)
+    else:
+        # 14 & 15. Unsupported contract versions immediately drop out with a clear error [INDEX]
+        raise NotImplementedError(f"Unsupported Contract Rule: Version variant '{version}' is not supported for type '{event_row.event_type}'.")
+
+
 def handle_unknown_event(connection, event_row) -> None:
-    """Graceful Fallback: Captures unmapped events without throwing fatal thread exceptions [INDEX]."""
+    """Graceful Fallback: Captures unmapped event types cleanly without crashing [INDEX]."""
     print(f"⚠️ Skipped unmapped or unknown event type: '{event_row.event_type}'")
+
 
 EVENT_HANDLERS_REGISTRY = {
     "QUALITY_CHECK_FAILED": handle_quality_failure_event
@@ -187,31 +121,23 @@ EVENT_HANDLERS_REGISTRY = {
 
 
 # ==============================================================================
-# 🔄 14, 15 & 18. ATOMIC REPLAY, BACKFILL & BATCH PROCESSING RECOVERY ENGINE
+# 🔄 ATOMIC REPLAY & RECOVERY ENGINE
 # ==============================================================================
 
 def replay_event_atomically(event_id: str, consumer_name: str) -> bool:
-    """
-    14 & 17. Atomic Event Replay Tool: Pulls an immutable historical record 
-    and executes processing workflows inside an isolated transactional block [INDEX].
-    """
-    # 16. The original event remains a permanent historical record; we never DELETE it [INDEX]
-    select_evt = text("SELECT event_id, event_type, run_id, payload FROM pipeline_event_store WHERE event_id = :event_id;")
+    """Atomic Event Replay Tool: Processes historical events safely inside single transactions [INDEX]."""
+    select_evt = text("SELECT event_id, event_type, event_version, run_id, payload FROM pipeline_event_store WHERE event_id = :event_id;")
     with engine.connect() as conn:
         evt = conn.execute(select_evt, {"event_id": event_id}).fetchone()
         
     if not evt:
-        print(f"❌ Event ID '{event_id}' not found in the append-only store.")
         return False
         
-    # 14. Coordinate multi-table side effects within a single PostgreSQL transaction boundary [INDEX]
     with engine.begin() as txn_conn:
         try:
-            # Execute business logic route
             handler = EVENT_HANDLERS_REGISTRY.get(evt.event_type, handle_unknown_event)
             handler(txn_conn, evt)
             
-            # Mark event checkpoint as successfully PROCESSED inside the same transaction context [INDEX]
             checkpoint_query = text(
                 """
                 INSERT INTO event_processing (event_id, consumer_name, status, attempt_count, error_message, processed_at, last_attempt_at)
@@ -224,7 +150,6 @@ def replay_event_atomically(event_id: str, consumer_name: str) -> bool:
             return True
             
         except Exception as exc:
-            # If processing hits an error, log a FAILED checkpoint state to the dead-letter tracking queue [INDEX]
             fail_query = text(
                 """
                 INSERT INTO event_processing (event_id, consumer_name, status, attempt_count, error_message, last_attempt_at)
@@ -234,31 +159,4 @@ def replay_event_atomically(event_id: str, consumer_name: str) -> bool:
                 """
             )
             txn_conn.execute(fail_query, {"event_id": event_id, "consumer_name": consumer_name, "err": str(exc)})
-            print(f"⚠️ Replay processing cycle hit an exception. Logged to dead-letter log: {exc}")
             return False
-
-
-def replay_failed_events(consumer_name: str) -> list:
-    """
-    15 & 18. Batch Replay Dead-Letter Worker: Discovers dead-lettered FAILED alerts, 
-    and iterates chronologically to re-run recovery attempts [INDEX].
-    """
-    query = text(
-        """
-        SELECT event_id 
-        FROM event_processing 
-        WHERE status = 'FAILED' AND consumer_name = :consumer_name
-        ORDER BY last_attempt_at ASC;
-        """
-    )
-    with engine.connect() as conn:
-        failed_rows = conn.execute(query, {"consumer_name": consumer_name}).fetchall()
-        
-    execution_results = []
-    for row in failed_rows:
-        evt_id = str(row.event_id)
-        # 18. Iterate and batch-replay each dead-letter event token [INDEX]
-        success_flag = replay_event_atomically(evt_id, consumer_name)
-        execution_results.append({"event_id": evt_id, "success": success_flag})
-        
-    return execution_results
