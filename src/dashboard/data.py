@@ -1,149 +1,232 @@
-from time import perf_counter
+"""
+Uganda Network Intelligence Platform - Data Access Layer
+Centralizes connection parameters and dashboard data access.
+"""
+
+import os
+import sys
+
 import pandas as pd
-import streamlit as st
-from sqlalchemy import text
-from src.database import engine
-from src.dashboard.logging import get_dashboard_logger
-
-logger = get_dashboard_logger()
+from sqlalchemy import create_engine, text
 
 
-def check_database_connection() -> bool:
-    """
-    Heartbeat Connectivity Checker: Runs a lightweight diagnostic pass 
-    to verify database connection pool availability [INDEX].
-    """
-    try:
-        with engine.connect() as connection:
-            connection.execute(text("SELECT 1;"))
-        return True
-    except Exception:
-        return False
+ENVIRONMENT = os.getenv("ENVIRONMENT", "DEVELOPMENT").upper().strip()
+DATABASE_URL = os.getenv("DATABASE_URL")
 
+if not DATABASE_URL:
+    print("FATAL CONFIGURATION ERROR: DATABASE_URL environment parameter is missing.")
+    print("Please execute 'set DATABASE_URL=...' before starting the application.")
+    sys.exit(1)
 
-def read_query(query: str, query_name: str = "dashboard_query", params: dict = None) -> pd.DataFrame:
-    """
-    Observable Query Execution Engine: Captures precise runtime stopwatch metrics 
-    and row counts, logging exceptions automatically if a query fails [INDEX].
-    """
-    start = perf_counter()
-    try:
-        with engine.connect() as connection:
-            result = pd.read_sql(text(query), connection, params=params)
-
-        duration = perf_counter() - start
-        logger.info(
-            "Dashboard query completed successfully: name=%s duration=%.4fs rows=%d",
-            query_name,
-            duration,
-            len(result),
-        )
-        return result
-
-    except Exception as e:
-        duration = perf_counter() - start
-        logger.exception(
-            "Dashboard query execution failed completely: name=%s duration=%.4fs | Error: %s",
-            query_name,
-            duration,
-            str(e),
-        )
-        raise
-
-
-# (Keep your check_database_connection and read_query functions exactly as they are)
-
-@st.cache_data(ttl=60)
-def get_pipeline_kpis() -> pd.DataFrame:
-    """Extracts macro-level pipeline success rates (cached for 60s) [INDEX]."""
-    return read_query("SELECT * FROM pipeline_kpis ORDER BY pipeline_name;", "pipeline_kpis")
-
-
-@st.cache_data(ttl=60)
-def get_current_health() -> pd.DataFrame:
-    """Extracts the instantaneous real-time health snapshot state (cached for 60s) [INDEX]."""
-    return read_query("SELECT * FROM current_pipeline_health ORDER BY checked_at DESC;", "current_pipeline_health")
-
-
-@st.cache_data(ttl=60)
-def get_daily_health() -> pd.DataFrame:
-    """Extracts daily historical timeline availability percentage trends (cached for 60s) [INDEX]."""
-    return read_query("SELECT * FROM daily_pipeline_health ORDER BY health_date;", "daily_pipeline_health")
-
-
-@st.cache_data(ttl=60)
-def get_stage_summary() -> pd.DataFrame:
-    """Extracts micro-stage SLA task execution metrics (cached for 60s) [INDEX]."""
-    return read_query("SELECT * FROM pipeline_stage_summary ORDER BY stage_name;", "pipeline_stage_summary")
-
-
-@st.cache_data(ttl=60)
-def get_site_performance(region=None, district=None, start_date=None, end_date=None) -> pd.DataFrame:
-    """Extracts cellular tower performance records matching dynamic filters securely [INDEX]."""
-    query = """
-        SELECT site_id, site_name, region, district, measurement_date, measurement_count,
-               avg_traffic_mb, avg_latency_ms, avg_packet_loss_pct, avg_signal_strength_dbm, avg_availability_pct
-        FROM gold_site_daily_performance WHERE 1 = 1
-    """
-    parameters = {}
-    if region:
-        query += " AND region = :region"
-        parameters["region"] = region
-    if district:
-        query += " AND district = :district"
-        parameters["district"] = district
-    if start_date:
-        query += " AND measurement_date >= :start_date"
-        parameters["start_date"] = start_date
-    if end_date:
-        query += " AND measurement_date <= :end_date"
-        parameters["end_date"] = end_date
-
-    query += " ORDER BY measurement_date DESC, site_id;"
-    return read_query(query, "site_performance", params=parameters)
-
-
-@st.cache_data(ttl=60)
-def get_network_summary(region=None, district=None, start_date=None, end_date=None) -> pd.DataFrame:
-    """Generates high-level network performance metric scores across your towers [INDEX]."""
-    query = """
-        SELECT COUNT(DISTINCT site_id) AS total_sites, SUM(measurement_count) AS total_measurements,
-               ROUND(AVG(avg_traffic_mb), 2) AS avg_traffic_mb, ROUND(AVG(avg_latency_ms), 2) AS avg_latency_ms,
-               ROUND(AVG(avg_packet_loss_pct), 2) AS avg_packet_loss_pct, ROUND(AVG(avg_availability_pct), 2) AS avg_availability_pct
-        FROM gold_site_daily_performance WHERE 1 = 1
-    """
-    parameters = {}
-    if region:
-        query += " AND region = :region"
-        parameters["region"] = region
-    if district:
-        query += " AND district = :district"
-        parameters["district"] = district
-    if start_date:
-        query += " AND measurement_date >= :start_date"
-        parameters["start_date"] = start_date
-    if end_date:
-        query += " AND measurement_date <= :end_date"
-        parameters["end_date"] = end_date
-
-    return read_query(query, "network_summary", params=parameters)
-def get_database_activity() -> pd.DataFrame:
-    """
-    Exposes high-resolution query tracking statistics straight out of PostgreSQL 
-    internal metadata catalogs to flag locking or long-running database requests [INDEX].
-    """
-    return read_query(
-        """
-        SELECT
-            pid,
-            state,
-            query_start,
-            now() - query_start AS duration,
-            LEFT(query, 150) AS query
-        FROM pg_stat_activity
-        WHERE datname = current_database()
-          AND state <> 'idle'
-        ORDER BY query_start;
-        """,
-        query_name="database_activity",
+if ENVIRONMENT == "TEST" and "test" not in DATABASE_URL.lower():
+    print(
+        "SECURITY FAULT: ENVIRONMENT is TEST but DATABASE_URL "
+        f"points to a non-test target: [{DATABASE_URL}]"
     )
+    sys.exit(1)
+
+
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=10,
+    max_overflow=20,
+    pool_recycle=1800,
+    pool_pre_ping=True,
+    connect_args={"connect_timeout": 5},
+)
+
+
+def read_query(
+    query_string: str,
+    query_name: str,
+    params: dict = None,
+) -> pd.DataFrame:
+    """Execute a read-only dashboard query and return a DataFrame."""
+    try:
+        bind_parameters = params if params is not None else {}
+
+        with engine.connect() as connection:
+            return pd.read_sql(
+                sql=text(query_string),
+                con=connection,
+                params=bind_parameters,
+            )
+
+    except Exception as exc:
+        print(
+            f"Relational access layer error on query "
+            f"[{query_name}]: {exc}"
+        )
+        return pd.DataFrame()
+
+
+def _safe_dataframe(df) -> pd.DataFrame:
+    """Normalize failed/None query results to an empty DataFrame."""
+    if isinstance(df, pd.DataFrame):
+        return df
+    return pd.DataFrame()
+
+
+def get_pipeline_kpis() -> pd.DataFrame:
+    """Return aggregate pipeline execution KPIs."""
+    query = """
+        SELECT
+            COUNT(*) AS total_runs,
+            COUNT(*) FILTER (WHERE status = 'SUCCESS') AS successful_runs,
+            COUNT(*) FILTER (WHERE status = 'FAILED') AS failed_runs,
+            COUNT(*) FILTER (WHERE status = 'RUNNING') AS running_runs
+        FROM pipeline_runs;
+    """
+
+    return _safe_dataframe(
+        read_query(query, "get_pipeline_kpis")
+    )
+
+
+def get_current_health() -> pd.DataFrame:
+    """Return current network health status distribution."""
+    query = """
+        SELECT
+            health_status,
+            COUNT(*) AS record_count
+        FROM silver_network_health
+        GROUP BY health_status
+        ORDER BY record_count DESC;
+    """
+
+    return _safe_dataframe(
+        read_query(query, "get_current_health")
+    )
+
+
+def get_daily_health() -> pd.DataFrame:
+    """Return daily network health status counts."""
+    query = """
+        SELECT
+            DATE(inserted_at) AS health_date,
+            health_status,
+            COUNT(*) AS record_count
+        FROM silver_network_health
+        GROUP BY DATE(inserted_at), health_status
+        ORDER BY health_date ASC;
+    """
+
+    return _safe_dataframe(
+        read_query(query, "get_daily_health")
+    )
+
+
+def get_stage_summary() -> pd.DataFrame:
+    """Return pipeline execution counts grouped by current stage."""
+    query = """
+        SELECT
+            current_stage,
+            COUNT(*) AS run_count,
+            COUNT(*) FILTER (WHERE status = 'SUCCESS') AS successful_runs,
+            COUNT(*) FILTER (WHERE status = 'FAILED') AS failed_runs,
+            COUNT(*) FILTER (WHERE status = 'RUNNING') AS running_runs
+        FROM pipeline_runs
+        GROUP BY current_stage
+        ORDER BY run_count DESC;
+    """
+
+    return _safe_dataframe(
+        read_query(query, "get_stage_summary")
+    )
+
+
+def get_site_performance(
+    region: str = None,
+    district: str = None,
+    start_date: str = None,
+    end_date: str = None,
+) -> pd.DataFrame:
+    """Return aggregated network performance by site."""
+    try:
+        conditions = []
+        params = {}
+
+        if region:
+            conditions.append("region = :region")
+            params["region"] = region
+
+        if district:
+            conditions.append("district = :district")
+            params["district"] = district
+
+        if start_date:
+            conditions.append("measured_at >= :start_date")
+            params["start_date"] = start_date
+
+        if end_date:
+            conditions.append(
+                "measured_at < CAST(:end_date AS DATE) + INTERVAL '1 day'"
+            )
+            params["end_date"] = end_date
+
+        where_clause = ""
+
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        query = f"""
+            SELECT
+                site_id,
+                site_name,
+                region,
+                district,
+                site_type,
+                COUNT(*) AS measurement_count,
+                AVG(traffic_mb) AS avg_traffic_mb,
+                AVG(latency_ms) AS avg_latency_ms,
+                AVG(packet_loss_pct) AS avg_packet_loss_pct,
+                AVG(availability_pct) AS avg_availability_pct
+            FROM silver_measurements
+            {where_clause}
+            GROUP BY
+                site_id,
+                site_name,
+                region,
+                district,
+                site_type
+            ORDER BY site_name ASC;
+        """
+
+        return _safe_dataframe(
+            read_query(
+                query,
+                "get_site_performance",
+                params=params,
+            )
+        )
+
+    except Exception as exc:
+        print(f"Site performance query failure: {exc}")
+        return pd.DataFrame()
+
+
+def get_network_summary() -> pd.DataFrame:
+    """Return aggregate network measurement statistics."""
+    query = """
+        SELECT
+            COUNT(DISTINCT site_id) AS total_sites,
+            COUNT(*) AS total_measurements,
+            AVG(traffic_mb) AS avg_traffic_mb,
+            AVG(latency_ms) AS avg_latency_ms,
+            AVG(packet_loss_pct) AS avg_packet_loss_pct,
+            AVG(availability_pct) AS avg_availability_pct
+        FROM silver_measurements;
+    """
+
+    return _safe_dataframe(
+        read_query(query, "get_network_summary")
+    )
+def check_database_connection() -> bool:
+    """Return True when the configured database connection is reachable."""
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return True
+    except Exception as exc:
+        print(f"Database connectivity check failed: {exc}")
+        return False
