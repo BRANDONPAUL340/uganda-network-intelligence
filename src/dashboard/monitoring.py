@@ -1,13 +1,12 @@
 
-"""
-Uganda Network Intelligence Platform — UI Monitoring Driver Layer
-Performance-optimized data extraction drivers utilizing selective caching [INDEX].
-"""
 import sys
 from pathlib import Path
 import pandas as pd
 import streamlit as st
 from src.dashboard.data import read_query
+
+from sqlalchemy import text
+from src.database import engine
 
 # Dynamic project root path resolution hook
 root_dir = str(Path(__file__).resolve().parents)
@@ -15,41 +14,56 @@ if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
 
-def get_pipeline_summary_metrics() -> dict:
-    """Overview Metric Driver: Computes throughput aggregate statistics from disk."""
+def get_pipeline_summary_metrics():
+    """
+    Return high-level pipeline and incident metrics using only
+    tables and columns that exist in the current PostgreSQL schema.
+    """
     try:
-        runs_query = """
-            SELECT 
-                COUNT(*) as total,
-                COUNT(CASE WHEN status = 'SUCCESS' THEN 1 END) as success,
-                COUNT(CASE WHEN status = 'FAILED' THEN 1 END) as failed
-            FROM pipeline_runs;
-        """
-        runs_df = read_query(runs_query, "get_pipeline_runs_summary")
-        
-        incidents_query = """
-            SELECT COUNT(*) as open_alerts 
-            FROM pipeline_incidents 
-            WHERE status != 'RESOLVED';
-        """
-        incidents_df = read_query(incidents_query, "get_active_incidents_count")
-        
-        total_runs = int(runs_df["total"].iloc[0]) if not runs_df.empty and pd.notna(runs_df["total"].iloc[0]) else 0
-        success_runs = int(runs_df["success"].iloc[0]) if not runs_df.empty and pd.notna(runs_df["success"].iloc[0]) else 0
-        failed_runs = int(runs_df["failed"].iloc[0]) if not runs_df.empty and pd.notna(runs_df["failed"].iloc[0]) else 0
-        open_incidents = int(incidents_df["open_alerts"].iloc[0]) if not incidents_df.empty and pd.notna(incidents_df["open_alerts"].iloc[0]) else 0
-        
+        with engine.connect() as connection:
+            pipeline_result = connection.execute(
+                text("""
+                    SELECT
+                        COUNT(*) AS total_runs,
+                        COUNT(*) FILTER (WHERE status = 'SUCCESS') AS success_runs,
+                        COUNT(*) FILTER (WHERE status = 'FAILED') AS failed_runs,
+                        COUNT(*) FILTER (WHERE status = 'RUNNING') AS running_runs
+                    FROM pipeline_runs
+                """)
+            ).mappings().one()
+
+            incident_result = connection.execute(
+                text("""
+                    SELECT
+                        COUNT(*) AS total_incidents,
+                        COUNT(*) FILTER (
+                            WHERE UPPER(status) != 'RESOLVED'
+                        ) AS open_incidents
+                    FROM incidents
+                """)
+            ).mappings().one()
+
         return {
             "status": "HEALTHY",
-            "total_runs": total_runs,
-            "success_runs": success_runs,
-            "failed_runs": failed_runs,
-            "open_incidents": open_incidents
+            "total_runs": int(pipeline_result["total_runs"] or 0),
+            "success_runs": int(pipeline_result["success_runs"] or 0),
+            "failed_runs": int(pipeline_result["failed_runs"] or 0),
+            "running_runs": int(pipeline_result["running_runs"] or 0),
+            "total_incidents": int(incident_result["total_incidents"] or 0),
+            "open_incidents": int(incident_result["open_incidents"] or 0),
         }
-    except Exception as exc:
-        print(f"🔴 Central analytics aggregation engine failure: {exc}")
-        return {"status": "ERROR", "total_runs": 0, "success_runs": 0, "failed_runs": 0, "open_incidents": 0}
 
+    except Exception as exc:
+        return {
+            "status": "ERROR",
+            "total_runs": 0,
+            "success_runs": 0,
+            "failed_runs": 0,
+            "running_runs": 0,
+            "total_incidents": 0,
+            "open_incidents": 0,
+            "error": str(exc),
+        }
 
 def get_recent_pipeline_logs(limit: int = 5) -> pd.DataFrame:
     """Pulls a lightweight subset of recent pipeline executions for the Overview landing."""
@@ -108,19 +122,41 @@ def get_filtered_pipeline_runs(status_filter: str = "All", run_id_filter: str = 
 
 
 def get_pipeline_run_steps_trace(run_id: int) -> pd.DataFrame:
-    """Step Trace Fetcher: Pulls sub-task items for a specific run_id using parameter bindings."""
+    """
+    Fetch granular processing stages for a specific pipeline run
+    using the authoritative pipeline_stage_runs schema.
+    """
     try:
         query = """
-            SELECT step_id, step_name, status, started_at, completed_at
-            FROM pipeline_steps
+            SELECT
+                stage_run_id,
+                run_id,
+                stage_name,
+                status,
+                started_at,
+                completed_at,
+                records_read,
+                records_inserted,
+                records_rejected,
+                records_skipped,
+                duration_seconds,
+                error_message
+            FROM pipeline_stage_runs
             WHERE run_id = :run_id
             ORDER BY started_at ASC;
         """
-        return read_query(query, "get_pipeline_run_steps_trace", params={"run_id": run_id})
-    except Exception as exc:
-        print(f"🔴 Sub-step extraction driver failure for run_id {run_id}: {exc}")
-        return pd.DataFrame()
 
+        return read_query(
+            query,
+            "get_pipeline_run_steps_trace",
+            params={"run_id": run_id},
+        )
+
+    except Exception as exc:
+        print(
+            f"Sub-step extraction driver failure for run_id {run_id}: {exc}"
+        )
+        return pd.DataFrame()
 
 def get_data_quality_summary_metrics() -> dict:
     """Metric Driver: Computes comprehensive pass, warning, and failure aggregates from disk."""
@@ -144,140 +180,226 @@ def get_data_quality_summary_metrics() -> dict:
         return {"status": "ERROR", "pass": 0, "warn": 0, "fail": 0}
 
 
-def get_filtered_data_quality_results(status_filter: str = "All", run_id_filter: str = "All") -> pd.DataFrame:
-    """Multi-Dimensional Grid Driver: Pulls detailed validation reports matching criteria parameters."""
+def get_filtered_data_quality_results(
+    status_filter: str = "All",
+    run_id_filter: str = "All",
+) -> pd.DataFrame:
+    """
+    Fetch data-quality validation results using the authoritative
+    data_quality_results schema.
+    """
     try:
         params = {}
         conditions = []
+
         if status_filter != "All":
             conditions.append("status = :status")
             params["status"] = status_filter
+
         if run_id_filter != "All":
             conditions.append("run_id = :run_id")
             params["run_id"] = int(run_id_filter.replace("RUN-", ""))
-            
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-            
+
+        where_clause = (
+            f"WHERE {' AND '.join(conditions)}"
+            if conditions
+            else ""
+        )
+
         query = f"""
-            SELECT 
-                quality_result_id AS result_id,
+            SELECT
+                quality_result_id,
                 run_id,
+                table_name,
                 check_name,
+                check_type,
                 status,
-                NULL AS measured_value,
-                NULL AS threshold_value,
-                checked_at AS evaluated_at
+                records_checked,
+                records_failed,
+                failure_rate_pct,
+                details,
+                checked_at,
+                error_message,
+                severity
             FROM data_quality_results
             {where_clause}
             ORDER BY checked_at DESC
             LIMIT 100;
         """
-        return read_query(query, "get_filtered_data_quality_results", params=params)
+
+        return read_query(
+            query,
+            "get_filtered_data_quality_results",
+            params=params,
+        )
+
     except Exception as exc:
-        print(f"🔴 Data quality filter log pipeline extraction failure: {exc}")
+        print(
+            f"Data quality filter log pipeline extraction failure: {exc}"
+        )
         return pd.DataFrame()
 
 
 def get_incidents_summary_metrics() -> dict:
-    """Metrics Driver: Computes open, closed, and high-severity incident counts."""
-    try:
-        query = """
-            SELECT 
-                COUNT(*) as total_alerts,
-                COUNT(CASE WHEN status != 'RESOLVED' THEN 1 END) as open_alerts,
-                COUNT(CASE WHEN status = 'RESOLVED' THEN 1 END) as resolved_alerts,
-                COUNT(CASE WHEN severity IN ('CRITICAL', 'HIGH') AND status != 'RESOLVED' THEN 1 END) as severe_alerts
-            FROM pipeline_incidents;
-        """
-        df = read_query(query, "get_incidents_summary_metrics")
-        
-        total = int(df["total_alerts"].iloc[0]) if not df.empty and pd.notna(df["total_alerts"].iloc[0]) else 0
-        open_count = int(df["open_alerts"].iloc[0]) if not df.empty and pd.notna(df["open_alerts"].iloc[0]) else 0
-        resolved = int(df["resolved_alerts"].iloc[0]) if not df.empty and pd.notna(df["resolved_alerts"].iloc[0]) else 0
-        severe = int(df["severe_alerts"].iloc[0]) if not df.empty and pd.notna(df["severe_alerts"].iloc[0]) else 0
-        
-        return {"status": "HEALTHY", "total": total, "open": open_count, "resolved": resolved, "severe": severe}
-    except Exception as exc:
-        print(f"🔴 Incidents summary matrix calculation failure: {exc}")
-        return {"status": "ERROR", "total": 0, "open": 0, "resolved": 0, "severe": 0}
-
-
-def get_filtered_incidents_logs(status_filter: str = "All", severity_filter: str = "All") -> pd.DataFrame:
-    """Parameterized Log Fetcher: Pulls incident reports matching selection criteria safely."""
-    try:
-        params = {}
-        conditions = []
-
-        if status_filter != "All":
-            if status_filter == "OPEN":
-                conditions.append("status != 'RESOLVED'")
-            else:
-                conditions.append("status = :status")
-                params["status"] = status_filter
-
-        if severity_filter != "All":
-            conditions.append("severity = :severity")
-            params["severity"] = severity_filter
-
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
-        query = f"""
-            SELECT
-                incident_id,
-                run_id,
-                check_name AS title,
-                message AS description,
-                severity,
-                status,
-                created_at,
-                resolved_at
-            FROM pipeline_incidents
-            {where_clause}
-            ORDER BY created_at DESC
-            LIMIT 100;
-        """
-
-        return read_query(query, "get_filtered_incidents_logs", params=params)
-
-    except Exception as exc:
-        print(f"Filtered incidents ledger retrieval failure: {exc}")
-        return pd.DataFrame()
-
-
-def get_event_workers_summary_metrics() -> dict:
-    """Build event/worker-style metrics from the current pipeline run registry."""
+    """
+    Return incident summary metrics using the authoritative
+    incidents schema.
+    """
     try:
         query = """
             SELECT
-                COUNT(*) AS total_events,
-                COUNT(*) FILTER (WHERE status IN ('SUCCESS', 'COMPLETED')) AS success_events,
-                COUNT(*) FILTER (WHERE status = 'FAILED') AS failed_events,
-                COALESCE(SUM(COALESCE(records_processed, 0)), 0) AS total_processed
-            FROM pipeline_runs;
+                COUNT(*) AS total_incidents,
+                COUNT(*) FILTER (
+                    WHERE UPPER(status) != 'RESOLVED'
+                ) AS open_incidents,
+                COUNT(*) FILTER (
+                    WHERE UPPER(severity) IN ('CRITICAL', 'HIGH')
+                ) AS critical_high_incidents,
+                COUNT(*) FILTER (
+                    WHERE UPPER(status) = 'RESOLVED'
+                ) AS resolved_incidents
+            FROM incidents;
         """
 
-        df = read_query(query, "get_event_workers_summary_metrics")
+        df = read_query(
+            query,
+            "get_incidents_summary_metrics",
+        )
 
         if df.empty:
             return {
-                "status": "HEALTHY",
-                "total": 0,
-                "success": 0,
-                "failed": 0,
-                "retries": 0,
+                "total_incidents": 0,
+                "open_incidents": 0,
+                "critical_high_incidents": 0,
+                "resolved_incidents": 0,
             }
 
         row = df.iloc[0]
 
         return {
-            "status": "HEALTHY",
-            "total": int(row["total_events"] or 0),
-            "success": int(row["success_events"] or 0),
-            "failed": int(row["failed_events"] or 0),
-            "retries": 0,
+            "total_incidents": int(row["total_incidents"] or 0),
+            "open_incidents": int(row["open_incidents"] or 0),
+            "critical_high_incidents": int(
+                row["critical_high_incidents"] or 0
+            ),
+            "resolved_incidents": int(
+                row["resolved_incidents"] or 0
+            ),
         }
 
-    except Exception:
+    except Exception as exc:
+        print(f"Incident summary extraction failure: {exc}")
+        return {
+            "total_incidents": 0,
+            "open_incidents": 0,
+            "critical_high_incidents": 0,
+            "resolved_incidents": 0,
+            "error": str(exc),
+        }
+def get_filtered_incidents_logs(
+    status_filter: str = "All",
+    severity_filter: str = "All",
+) -> pd.DataFrame:
+    """
+    Fetch incident records using the authoritative incidents schema.
+    """
+    try:
+        params = {}
+        conditions = []
+
+        if status_filter != "All":
+            conditions.append("UPPER(status) = :status")
+            params["status"] = status_filter.upper()
+
+        if severity_filter != "All":
+            conditions.append("UPPER(severity) = :severity")
+            params["severity"] = severity_filter.upper()
+
+        where_clause = (
+            f"WHERE {' AND '.join(conditions)}"
+            if conditions
+            else ""
+        )
+
+        query = f"""
+            SELECT
+                incident_id,
+                site_id,
+                equipment_id,
+                incident_type,
+                severity,
+                status,
+                start_time,
+                end_time,
+                description
+            FROM incidents
+            {where_clause}
+            ORDER BY start_time DESC
+            LIMIT 100;
+        """
+
+        return read_query(
+            query,
+            "get_filtered_incidents_logs",
+            params=params,
+        )
+
+    except Exception as exc:
+        print(
+            f"Incident log extraction failure: {exc}"
+        )
+        return pd.DataFrame()
+
+def get_event_workers_summary_metrics() -> dict:
+    """Computes comprehensive aggregates for emitted events and backoff retries safely from disk."""
+    try:
+        store_query = "SELECT COUNT(*) as total_evts FROM pipeline_event_store;"
+
+        proc_query = """
+            SELECT
+                COUNT(CASE WHEN status = 'PROCESSED' THEN 1 END) as success_evts,
+                COUNT(CASE WHEN status = 'FAILED' THEN 1 END) as failed_evts,
+                SUM(COALESCE(retry_count, 0)) as total_retries
+            FROM event_processing;
+        """
+
+        store_df = read_query(store_query, "get_total_events_count")
+        proc_df = read_query(proc_query, "get_processing_worker_aggregates")
+
+        total = (
+            int(store_df["total_evts"].iloc[0])
+            if not store_df.empty and pd.notna(store_df["total_evts"].iloc[0])
+            else 0
+        )
+
+        success = (
+            int(proc_df["success_evts"].iloc[0])
+            if not proc_df.empty and pd.notna(proc_df["success_evts"].iloc[0])
+            else 0
+        )
+
+        failed = (
+            int(proc_df["failed_evts"].iloc[0])
+            if not proc_df.empty and pd.notna(proc_df["failed_evts"].iloc[0])
+            else 0
+        )
+
+        retries = (
+            int(proc_df["total_retries"].iloc[0])
+            if not proc_df.empty and pd.notna(proc_df["total_retries"].iloc[0])
+            else 0
+        )
+
+        return {
+            "status": "HEALTHY",
+            "total": total,
+            "success": success,
+            "failed": failed,
+            "retries": retries,
+        }
+
+    except Exception as exc:
+        print(f"Event worker metrics summary compilation crash: {exc}")
         return {
             "status": "ERROR",
             "total": 0,
@@ -291,18 +413,104 @@ def get_filtered_events_ledger(
     type_filter: str = "All",
     status_filter: str = "All",
 ) -> pd.DataFrame:
-    """Provides the Events page ledger using the current pipeline run registry."""
+    """Combines append-only log maps and worker state registers to filter streaming queues safely."""
     try:
         params = {}
         conditions = []
 
         if type_filter != "All":
-            conditions.append("pipeline_name = :event_type")
+            conditions.append("s.event_type = :event_type")
             params["event_type"] = type_filter
 
         if status_filter != "All":
-            conditions.append("status = :status")
+            conditions.append("p.status = :status")
             params["status"] = status_filter
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        query = f"""
+            SELECT
+                s.event_id,
+                s.event_type,
+                s.run_id,
+                s.producer,
+                s.created_at,
+                COALESCE(p.status, 'PENDING') as status,
+                COALESCE(p.retry_count, 0) as retry_count,
+                p.processed_at
+            FROM pipeline_event_store s
+            LEFT JOIN event_processing p ON s.event_id = p.event_id
+            {where_clause}
+            ORDER BY s.created_at DESC
+            LIMIT 100;
+        """
+
+        return read_query(query, "get_filtered_events_ledger", params=params)
+
+    except Exception as exc:
+        print(f"Filtered event queue extraction crash: {exc}")
+        return pd.DataFrame()
+
+
+def get_lineage_summary_metrics() -> dict:
+    """
+    Return lineage summary metrics using the authoritative
+    pipeline_lineage schema.
+    """
+    try:
+        query = """
+            SELECT
+                COUNT(*) AS total_records,
+                COUNT(DISTINCT target_table) AS unique_targets,
+                COALESCE(SUM(records_processed), 0) AS cumulative_rows
+            FROM pipeline_lineage;
+        """
+
+        df = read_query(
+            query,
+            "get_lineage_summary_metrics",
+        )
+
+        if df.empty:
+            return {
+                "total_records": 0,
+                "unique_targets": 0,
+                "cumulative_rows": 0,
+            }
+
+        row = df.iloc[0]
+
+        return {
+            "total_records": int(row["total_records"] or 0),
+            "unique_targets": int(row["unique_targets"] or 0),
+            "cumulative_rows": int(row["cumulative_rows"] or 0),
+        }
+
+    except Exception as exc:
+        print(f"Lineage summary extraction failure: {exc}")
+        return {
+            "total_records": 0,
+            "unique_targets": 0,
+            "cumulative_rows": 0,
+        }
+
+
+def get_filtered_pipeline_lineage_logs(
+    run_id_filter: str = "All",
+) -> pd.DataFrame:
+    """
+    Fetch pipeline lineage records using the authoritative
+    pipeline_lineage schema.
+    """
+    try:
+        params = {}
+        conditions = []
+
+        if run_id_filter != "All":
+            conditions.append("run_id = :run_id")
+            params["run_id"] = int(
+                run_id_filter.replace("RUN-", "")
+            )
 
         where_clause = (
             f"WHERE {' AND '.join(conditions)}"
@@ -312,128 +520,9 @@ def get_filtered_events_ledger(
 
         query = f"""
             SELECT
-                run_id AS event_id,
-                pipeline_name AS event_type,
-                run_id,
-                'pipeline' AS producer,
-                started_at AS created_at,
-                status,
-                0 AS retry_count,
-                completed_at AS processed_at
-            FROM pipeline_runs
-            {where_clause}
-            ORDER BY started_at DESC
-            LIMIT 100;
-        """
-
-        return read_query(
-            query,
-            "get_filtered_events_ledger",
-            params=params,
-        )
-
-    except Exception:
-        return pd.DataFrame(
-            columns=[
-                "event_id",
-                "event_type",
-                "run_id",
-                "producer",
-                "created_at",
-                "status",
-                "retry_count",
-                "processed_at",
-            ]
-        )
-
-
-def get_events_distribution_by_type() -> pd.DataFrame:
-    """Returns pipeline execution frequency by pipeline name."""
-    try:
-        query = """
-            SELECT
-                pipeline_name AS event_type,
-                COUNT(*) AS total_events
-            FROM pipeline_runs
-            GROUP BY pipeline_name
-            ORDER BY total_events DESC;
-        """
-
-        return read_query(
-            query,
-            "get_events_distribution_by_type",
-        )
-
-    except Exception:
-        return pd.DataFrame(
-            columns=["event_type", "total_events"]
-        )
-
-
-def get_lineage_summary_metrics() -> dict:
-    """Metrics Driver: Computes total tracking pathways and cumulative volume throughput metrics safely."""
-    try:
-        query = """
-            SELECT
-                COUNT(*) as total_records,
-                COUNT(DISTINCT target_table) as unique_targets,
-                SUM(COALESCE(records_processed, 0)) as cumulative_rows
-            FROM pipeline_lineage;
-        """
-
-        df = read_query(query, "get_lineage_summary_metrics")
-
-        records = (
-            int(df["total_records"].iloc[0])
-            if not df.empty and pd.notna(df["total_records"].iloc[0])
-            else 0
-        )
-
-        targets = (
-            int(df["unique_targets"].iloc[0])
-            if not df.empty and pd.notna(df["unique_targets"].iloc[0])
-            else 0
-        )
-
-        total_rows = (
-            int(df["cumulative_rows"].iloc[0])
-            if not df.empty and pd.notna(df["cumulative_rows"].iloc[0])
-            else 0
-        )
-
-        return {
-            "status": "HEALTHY",
-            "records": records,
-            "targets": targets,
-            "cumulative_rows": total_rows,
-        }
-
-    except Exception as exc:
-        print(f"Dataset lineage aggregate compiler failure: {exc}")
-        return {
-            "status": "ERROR",
-            "records": 0,
-            "targets": 0,
-            "cumulative_rows": 0,
-        }
-
-
-def get_filtered_pipeline_lineage_logs(
-    run_id_filter: str = "All",
-) -> pd.DataFrame:
-    """18. Verified Lineage Log Fetcher: Restricts targets to confirmed database columns cleanly."""
-    try:
-        params = {}
-        where_clause = ""
-
-        if run_id_filter != "All":
-            where_clause = "WHERE run_id = :run_id"
-            params["run_id"] = int(run_id_filter.replace("RUN-", ""))
-
-        query = f"""
-            SELECT
                 lineage_id,
                 run_id,
+                source_table,
                 target_table,
                 records_processed,
                 created_at
@@ -450,9 +539,10 @@ def get_filtered_pipeline_lineage_logs(
         )
 
     except Exception as exc:
-        print(f"Data lineage trace pipeline extraction driver failure: {exc}")
+        print(
+            f"Pipeline lineage extraction failure: {exc}"
+        )
         return pd.DataFrame()
-
 
 # ==============================================================================
 # OPTIMIZED TIME-SERIES CACHING LAYERS (Day 238) [INDEX]
@@ -504,15 +594,24 @@ def get_data_quality_trends() -> pd.DataFrame:
 
 @st.cache_data(ttl=30)
 def get_incidents_severity_distribution() -> pd.DataFrame:
-    """Cached Incident Categories: Caches categorical distributions safely for 30 seconds."""
+    """
+    Return incident counts grouped by severity.
+    """
     try:
         query = """
             SELECT
-                severity,
-                COUNT(*) as total_incidents
-            FROM pipeline_incidents
-            GROUP BY severity
-            ORDER BY total_incidents DESC;
+                UPPER(severity) AS severity,
+                COUNT(*) AS incident_count
+            FROM incidents
+            GROUP BY UPPER(severity)
+            ORDER BY
+                CASE UPPER(severity)
+                    WHEN 'CRITICAL' THEN 1
+                    WHEN 'HIGH' THEN 2
+                    WHEN 'MEDIUM' THEN 3
+                    WHEN 'LOW' THEN 4
+                    ELSE 5
+                END;
         """
 
         return read_query(
@@ -521,12 +620,33 @@ def get_incidents_severity_distribution() -> pd.DataFrame:
         )
 
     except Exception as exc:
-        print(f"Incident classification cached bar aggregator crash: {exc}")
+        print(
+            f"Incident severity distribution extraction failure: {exc}"
+        )
         return pd.DataFrame()
 
 
 @st.cache_data(ttl=30)
+def get_events_distribution_by_type() -> pd.DataFrame:
+    """Cached Event Frequencies: Reduces transactional throughput overhead."""
+    try:
+        query = """
+            SELECT
+                event_type,
+                COUNT(*) as total_events
+            FROM pipeline_event_store
+            GROUP BY event_type
+            ORDER BY total_events DESC;
+        """
 
+        return read_query(
+            query,
+            "get_events_distribution_by_type",
+        )
+
+    except Exception as exc:
+        print(f"Event types cached stream distribution compiler crash: {exc}")
+        return pd.DataFrame()
 def get_open_alerts() -> pd.DataFrame:
     try:
         query = """
@@ -766,7 +886,7 @@ def get_latest_quality_status() -> pd.DataFrame:
                 status,
                 records_checked,
                 failed_records,
-                check_value,
+                measured_value,
                 message,
                 checked_at
             FROM data_quality_results
@@ -788,7 +908,7 @@ def get_quality_history() -> pd.DataFrame:
                 status,
                 records_checked,
                 failed_records,
-                check_value,
+                measured_value,
                 message,
                 checked_at
             FROM data_quality_results
