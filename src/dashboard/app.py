@@ -1,1136 +1,124 @@
-import sys
-from datetime import date, datetime, timezone
-from pathlib import Path
-import pandas as pd
 
-# ==============================================================================
-# 🌌 PROJECT PATHWAY RESOLUTION HOOK
-# Resolves ModuleNotFoundError by anchoring the repository root to sys.path [INDEX].
-# ==============================================================================
-root_dir = str(Path(__file__).resolve().parents)
-if root_dir not in sys.path:
-    sys.path.insert(0, root_dir)
-
-import plotly.express as px
 import streamlit as st
 
-from src.config import PIPELINE_NAME
-from src.dashboard.health import check_dashboard_database
-from src.dashboard.version import DASHBOARD_VERSION
-from src.dashboard.monitoring import get_open_alerts, get_recent_alerts
-from src.monitoring.alert_metrics import (
-    get_parameterized_alert_counts,
-    get_parameterized_resolution_summary,
-    get_parameterized_daily_trends,
-    get_parameterized_alert_recurrence,
-)
-from src.dashboard.data import (
-    check_database_connection,
-    get_current_health,
-    get_daily_health,
-    get_database_activity,
-    get_network_summary,
-    get_pipeline_kpis,
-    get_site_performance,
-    get_stage_summary,
-)
+from src.dashboard.monitoring import get_pipeline_summary_metrics
+
+
+# ---------------------------------------------------------------------------
+# Global Page Configuration
+# ---------------------------------------------------------------------------
 
 st.set_page_config(
-    page_title="Uganda Network & Service Intelligence",
-    page_icon="📡",
+    page_title="Uganda Network Intelligence Platform",
+    page_icon="🌐",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-st.title("📡 Uganda Network & Service Intelligence Console")
-st.caption(f"Operational Cockpit & Incident Analytics — Pipeline: {PIPELINE_NAME}")
 
-if st.button("🔄 Refresh Application Data"):
-    st.cache_data.clear()
-    st.rerun()
+# ---------------------------------------------------------------------------
+# Sidebar Branding
+# ---------------------------------------------------------------------------
 
-st.markdown("---")
+st.sidebar.title("🌍 UGANDA NETWORK")
+st.sidebar.subheader("INTELLIGENCE")
+st.sidebar.markdown("---")
 
-# ==============================================================================
-# 🎛️ SIDEBAR INTERACTIVE CONTROL FILTERS & LIVE HEALTH INDICATOR
-# ==============================================================================
-st.sidebar.header("Dashboard Filters")
-dashboard_health = check_dashboard_database()
 
-if dashboard_health["status"] == "HEALTHY":
-    st.sidebar.success("Database: Healthy")
-else:
-    st.sidebar.error("Database: Critical")
-
-st.sidebar.caption(f"Dashboard version: {DASHBOARD_VERSION}")
+# ---------------------------------------------------------------------------
+# Database Health Check
+# ---------------------------------------------------------------------------
 
 try:
-    all_sites_base = get_site_performance()
-except Exception as exc:
-    st.error(f"Unable to initialize filter datasets: {exc}")
-    st.stop()
+    health = get_pipeline_summary_metrics()
+    db_connected = health.get("status") == "HEALTHY"
 
-# 🌍 A. Geographic & Timeline Filters
-regions = sorted(all_sites_base["region"].dropna().unique().tolist())
-selected_region = st.sidebar.selectbox("Region", ["All regions"] + regions)
-region_filter = None if selected_region == "All regions" else selected_region
+except Exception:
+    db_connected = False
 
-all_sites_base["measurement_date"] = pd.to_datetime(all_sites_base["measurement_date"]).dt.date
-min_date = all_sites_base["measurement_date"].min() if not all_sites_base.empty else date.today()
-max_date = all_sites_base["measurement_date"].max() if not all_sites_base.empty else date.today()
 
-selected_dates = st.sidebar.date_input(
-    "Operational analytical range",
-    value=(min_date, max_date),
-    min_value=min_date,
-    max_value=max_date,
-)
+# ---------------------------------------------------------------------------
+# Multi-Page Navigation
+# ---------------------------------------------------------------------------
+#
+# The Input Data page is the final operational ingestion interface.
+#
+# Event Store Worker Monitoring remains intentionally excluded because its
+# underlying persistence model is not part of the authoritative schema.
+#
+# Lineage remains active because pipeline_lineage is present and verified.
+# ---------------------------------------------------------------------------
 
-if isinstance(selected_dates, tuple) and len(selected_dates) == 2:
-    start_date, end_date = selected_dates
+pages = {
+    "📊 Dashboard Operational Views": [
+        st.Page(
+            "pages/overview.py",
+            title="Platform Overview",
+            icon="🏠",
+            default=True,
+        ),
+        st.Page(
+            "pages/pipeline_runs.py",
+            title="Pipeline Execution Logs",
+            icon="🔄",
+        ),
+    ],
+
+    "📡 Telemetry & Metrics": [
+        st.Page(
+            "pages/data_quality.py",
+            title="Data Quality Engine",
+            icon="✅",
+        ),
+        st.Page(
+            "pages/incidents.py",
+            title="Incident Management Panel",
+            icon="🚨",
+        ),
+    ],
+
+    "🧭 Data Lineage": [
+        st.Page(
+            "pages/lineage.py",
+            title="Data Lineage Map",
+            icon="🧭",
+        ),
+    ],
+
+    "📝 Data Operations": [
+        st.Page(
+            "pages/input_data.py",
+            title="Input Data",
+            icon="📝",
+        ),
+    ],
+}
+
+
+# ---------------------------------------------------------------------------
+# Navigation Router
+# ---------------------------------------------------------------------------
+
+navigation_router = st.navigation(pages)
+
+
+# ---------------------------------------------------------------------------
+# Sidebar Infrastructure Status
+# ---------------------------------------------------------------------------
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🖥️ System Infrastructure")
+
+if db_connected:
+    st.sidebar.success("🟢 PostgreSQL 18: Connected")
 else:
-    start_date, end_date = min_date, max_date
+    st.sidebar.error("🔴 PostgreSQL 18: Disconnected")
 
-# FETCH METRIC DATA PANELS
-try:
-    kpis = get_pipeline_kpis()
-    current_health = get_current_health()
-    daily_health = get_daily_health()
-    stage_summary = get_stage_summary()
-    open_alerts = get_open_alerts()
-    recent_alerts = get_recent_alerts()
-    
-    # Ingest dynamic parameterised analytics [INDEX]
-    metrics_counts = get_parameterized_alert_counts(start_date, end_date)
-    res_summary = get_parameterized_resolution_summary(start_date, end_date)
-    trend_df = get_parameterized_daily_trends(start_date, end_date)
-    recurrence_df = get_parameterized_alert_recurrence(start_date, end_date)
-    
-    network_summary = get_network_summary(region=region_filter, start_date=start_date, end_date=end_date)
-    site_performance = get_site_performance(region=region_filter, start_date=start_date, end_date=end_date)
-except Exception as exc:
-    st.error(f"Unable to synchronize analytics data frames: {exc}")
-    st.stop()
+st.sidebar.caption("Workstation Node Location: Kampala, Uganda")
 
 
-# ==============================================================================
-# 🟢 CONTAINER SECTION 1: Pipeline Health Summary
-# ==============================================================================
-st.header("🟢 Core Pipeline Infrastructure Health")
-if current_health.empty:
-    st.warning("No pipeline health indicators available.")
-else:
-    pipeline_status = current_health["overall_status"].iloc[0]
-    if pipeline_status == "HEALTHY":
-        st.success(f"Pipeline Health Status: **{pipeline_status}** (⚡ Engine operating normally)")
-    else:
-        st.error(f"Pipeline Health Status: **{pipeline_status}** (⚠️ Active system delay tracked)")
+# ---------------------------------------------------------------------------
+# Execute Selected Page
+# ---------------------------------------------------------------------------
 
-
-# ==============================================================================
-# 📊 CONTAINER SECTION 2: Labeled Operational Summary (Step 15)
-# ==============================================================================
-st.markdown("---")
-st.header("📋 Incident Operational Summary")
-
-col_op1, col_op2, col_op3, col_op4, col_op5 = st.columns(5)
-col_op1.metric("Active Open Alerts", int(metrics_counts["open_alerts"]))
-col_op2.metric("Alerts Triggered Today", int(metrics_counts["alerts_today"]))
-col_op3.metric("Alerts Resolved Today", int(metrics_counts["resolved_today"]))
-col_op4.metric("Avg Resolution Time", f"{res_summary['average_seconds']}m")
-col_op5.metric("Median Resolution Time", f"{res_summary['median_seconds']}m")
-
-
-# ==============================================================================
-# 📉 CONTAINER SECTION 3: Alert Analytics & Trends (Step 12 & 13)
-# ==============================================================================
-st.markdown("---")
-st.header("📉 Multi-Dimensional Alert Analytics")
-
-col_an1, col_an2 = st.columns(2)
-
-with col_an1:
-    st.subheader("🗓️ Incident Volume Time-Series Trend")
-    if trend_df.empty:
-        st.info("No time-series data matches your chosen date window.")
-    else:
-        # Melt dataframe to plot created vs resolved comparisons natively
-        melted_df = trend_df.melt(id_vars=["tracking_date"], value_vars=["created_count", "resolved_count"],
-                                  var_name="Metric Type", value_name="Incident Count")
-        fig_trend = px.line(melted_df, x="tracking_date", y="Incident Count", color="Metric Type",
-                            markers=True, title="Alerts Created vs Alerts Resolved Over Time")
-        st.plotly_chart(fig_trend, use_container_width=True)
-
-with col_an2:
-    st.subheader("🔄 Recurring Incident Distribution Check")
-    if recurrence_df.empty:
-        st.info("No recurring anomalies found inside this range window.")
-    else:
-        fig_rec = px.bar(recurrence_df, x="occurrences", y="alert_name", orientation="h",
-                         title="Alert Volume Recurrence Density by Type",
-                         labels={"occurrences": "Total Occurrence Frequency", "alert_name": "Alert Name Type"})
-        st.plotly_chart(fig_rec, use_container_width=True)
-
-
-# ==============================================================================
-# 📡 CONTAINER SECTION 4: Network Metrics & Drill Downs
-# ==============================================================================
-st.markdown("---")
-st.header("📊 Cellular Sites Performance Metrics")
-
-if network_summary.empty or network_summary["total_sites"].iloc[0] is None:
-    st.warning("No cellular tower performance values found within these filter targets.")
-else:
-    summary = network_summary.iloc[0]
-
-    col_net1, col_net2, col_net3, col_net4 = st.columns(4)
-
-    col_net1.metric(
-        "Active Towers",
-        int(summary["total_sites"] or 0)
-    )
-
-    col_net2.metric(
-        "Total Ingested Data (MB)",
-        f"{float(summary['avg_traffic_mb'] or 0):,.2f}"
-    )
-
-    col_net3.metric(
-        "Avg Latency Metric",
-        f"{float(summary['avg_latency_ms'] or 0):.2f}ms"
-    )
-
-    col_net4.metric(
-        "Tower Link Availability",
-        f"{float(summary['avg_availability_pct'] or 0):.2f}%"
-    )
-# ==============================================================================
-# 🕵️‍♂️ CONTAINER SECTION: Incident Lineage Investigation & Traceability Center
-# ==============================================================================
-st.markdown("---")
-st.header("🕵️‍♂️ Incident Lineage Investigation Center")
-
-from src.dashboard.monitoring import (
-    get_incident_complete_context,
-    get_stage_details,
-    get_run_lineage,
-    get_current_processing_watermarks,
-)
-
-if not recent_alerts.empty:
-    alert_choices = sorted(recent_alerts["alert_id"].dropna().unique().tolist(), reverse=True)
-    selected_alert_id = st.selectbox("Select an Alert ID to map execution context & lineage roots", alert_choices)
-    
-    if selected_alert_id:
-        # Fetch combined incident query context blocks [INDEX]
-        incident_df = get_incident_complete_context(selected_alert_id)
-        
-        if not incident_df.empty:
-            inc = incident_df.iloc[0]
-            run_id = inc["run_id"]
-            failed_stage = inc["stage_name"]
-            
-            # 17. Render Consolidated Incident Card Status Grid
-            st.markdown(f"### 🚨 INCIDENT #{inc['alert_id']}")
-            col_inc1, col_inc2 = st.columns(2)
-            with col_inc1:
-                st.info(f"**Alert Name:** `{inc['alert_name']}`\n\n**Message:** {inc['message']}")
-                st.write(f"**Triggered At:** `{inc['triggered_at']}`")
-                st.write(f"**Correlated Run ID:** `{int(run_id) if pd.notna(run_id) else 'N/A (Legacy/No Context)'}`")
-            with col_inc2:
-                st.write(f"**Incident Status:** `{inc['status']}`")
-                st.write(f"**Severity Level:** `{inc['severity']}`")
-                st.write(f"**Target Layer:** `{failed_stage or 'N/A'}`")
-                if pd.notna(inc['resolved_at']):
-                    st.write(f"**Resolved At:** `{inc['resolved_at']}`")
-            
-            # Conditionally expose execution metrics if a valid pipeline run is bound to the alert [INDEX]
-            if pd.notna(run_id):
-                run_id_int = int(run_id)
-                
-                st.markdown("---")
-                st.subheader("⚙️ Correlated Pipeline Run Parameters")
-                col_pr1, col_op2, col_pr3 = st.columns(3)
-                col_pr1.metric("Pipeline Name", str(inc["pipeline_name"]))
-                col_op2.metric("Execution Status", str(inc["pipeline_status"]))
-                col_pr3.metric("Total Records Processed", f"{int(inc['records_processed'] or 0):,}")
-                
-                # 18. Add Stage Context Block Grids [INDEX]
-                st.markdown("---")
-                col_stg, col_wm = st.columns(2)
-                
-                with col_stg:
-                    st.subheader("⏱️ Pipeline Stages Execution Breakdown")
-                    stage_df = get_stage_details(run_id_int)
-                    if stage_df.empty:
-                        st.info("No sub-stage runs registered for this pipeline run instance.")
-                    else:
-                        st.dataframe(stage_df[["stage_name", "status", "duration_seconds", "started_at"]], 
-                                     use_container_width=True, hide_index=True)
-                
-                with col_wm:
-                    # 15. Connect Incremental Data Watermark Offsets [INDEX]
-                    st.subheader("🎯 Active Processing Watermarks State")
-                    watermarks_df = get_current_processing_watermarks()
-                    if watermarks_df.empty:
-                        st.info("No system processing watermarks logged inside tracking tables.")
-                    else:
-                        st.dataframe(watermarks_df[["stage_name", "source_name", "last_raw_measurement_id", "updated_at"]], 
-                                     use_container_width=True, hide_index=True)
-                
-                # 19. Add Visual Lineage Trace Flow Diagrams
-                st.markdown("---")
-                st.subheader("🗺️ Data Lineage Ingestion Flow Trace")
-                lineage_df = get_run_lineage(run_id_int)
-                
-                # Render metadata structural text diagram [INDEX]
-                l_raw = "✅ measurements (RAW Vault Ingested)"
-                l_silver = "🟢 SILVER (Cleaned & Deduplicated)" if failed_stage != "SILVER" else "❌ SILVER (Failed layer block)"
-                l_gold = "🟡 GOLD (Analytical Reporting Layer)" if failed_stage not in ["SILVER", "GOLD"] else "⚪ GOLD (Not run due to failure)"
-                
-                st.text(f"""
-                {l_raw}
-                       │
-                       ▼
-                {l_silver}
-                       │
-                       ▼
-                {l_gold}
-                """)
-                
-                if not lineage_df.empty:
-                    with st.expander("Expose Detailed Affected Table Record Rows"):
-                        st.dataframe(lineage_df, use_container_width=True, hide_index=True)
-            else:
-                st.warning("ℹ️ This incident record does not contain active pipeline run-time correlation mapping context metadata fields.")
-        else:
-            st.error("Could not fetch trace parameters for the chosen alert token.")
-else:
-    st.info("No incidents logged in the history table ledger to investigate.")
-
-
-
-# ==============================================================================
-# 🔧 CONTAINER SECTION 5: Platform Engine Diagnostics Expander Logs
-# ==============================================================================
-st.markdown("---")
-st.header("🔧 Platform Engine Diagnostics")
-with st.expander("Active Database Activity Stream (pg_stat_activity)"):
-    try:
-        activity = get_database_activity()
-        if activity.empty:
-            st.info("No queries currently executing outside idle connection pools.")
-        else:
-            st.dataframe(activity, use_container_width=True, hide_index=True)
-    except Exception as exc:
-        st.warning(f"Could not extract process tracking parameters: {exc}")
-
-st.divider()
-st.caption("Uganda Network & Service Intelligence Data Platform — PostgreSQL 18 analytics view")
-# ==============================================================================
-# 🚨 OPERATIONS & MONITORING SECTION (Day 124 Enhanced UI Metrics Row)
-# ==============================================================================
-st.markdown("---")
-st.header("🚨 Pipeline Operations & Monitoring Cockpit")
-
-from src.dashboard.monitoring import (
-    get_recent_runs,
-    get_failed_runs,
-    get_failed_steps,
-    get_run_summary
-)
-
-# Fetch aggregate statistics data frames from database view models [INDEX]
-try:
-    pipeline_summary_df = get_run_summary()
-    recent_runs_df = get_recent_runs(limit=10)
-    failed_steps_df = get_failed_steps()
-except Exception as exc:
-    st.error(f"Unable to load active orchestration metrics logs: {exc}")
-    st.stop()
-
-# 7. Map summary data frames values into native Streamlit metric scorecards [INDEX]
-if not pipeline_summary_df.empty:
-    summary_row = pipeline_summary_df.iloc[0]
-    total_runs = int(summary_row["total_runs"] or 0)
-    successful_runs = int(summary_row["successful_runs"] or 0)
-    failed_runs = int(summary_row["failed_runs"] or 0)
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Total Pipeline Runs", total_runs)
-    with col2:
-        st.metric("Successful Executions", successful_runs, delta="🟢 Operational")
-    with col3:
-        if failed_runs > 0:
-            st.metric("Failed Executions", failed_runs, delta=f"⚠️ {failed_runs} Issues Tracked", delta_color="inverse")
-        else:
-            st.metric("Failed Executions", failed_runs, delta="✨ 0 Crashes")
-
-# Render recent execution table logs for full operator traceability
-st.markdown("### 📋 Recent Execution History Logs")
-if recent_runs_df.empty:
-    st.info("No active pipeline execution logs found on disk.")
-else:
-    st.dataframe(recent_runs_df, use_container_width=True, hide_index=True)
-
-if not failed_steps_df.empty:
-    st.markdown("### ❌ Fine-Grained Sub-Task Failures")
-    st.dataframe(failed_steps_df, use_container_width=True, hide_index=True)
-# ==============================================================================
-# 🚨 SYSTEM OPERATIONS, OBSERVABILITY & INCIDENT DISPATCH NODE
-# ==============================================================================
-import pandas as pd
-import streamlit as st
-
-# Centralized data access layer module imports
-from src.dashboard.monitoring import (
-    get_available_runs,
-    get_failed_steps,
-    get_last_successful_run,
-    get_run_details,
-    get_run_step_durations,
-    get_run_steps,
-    get_step_durations,
-)
-
-st.markdown("---")
-st.header("🚨 Pipeline Operations & Performance Analytics")
-
-# 🛠️ 1. DATA EXTRACTION & SYNCHRONIZATION OVERVIEW
-try:
-    step_data_df = get_step_durations()
-    last_success_df = get_last_successful_run()
-    failed_steps_df = get_failed_steps()
-    available_runs_df = get_available_runs()
-except Exception as exc:
-    st.error(f"Unable to synchronize system observability metrics data: {exc}")
-    st.stop()
-
-
-# ⏱️ 2. HISTORICAL STAGE PERFORMANCE TIER
-st.subheader("⏱️ Micro-Stage Task Performance Analytics")
-
-if step_data_df.empty:
-    st.info("No sub-stage task runtime entries found to compute performance analytics.")
-else:
-    col_chart_left, col_chart_right = st.columns(2)
-    
-    with col_chart_left:
-        st.markdown("**Granular Task Execution Records**")
-        st.dataframe(
-            step_data_df[["run_id", "step_name", "status", "records_processed", "duration_seconds"]],
-            use_container_width=True,
-            hide_index=True
-        )
-        
-    with col_chart_right:
-        st.markdown("**Historical Average Stage Runtimes (Seconds)**")
-        avg_durations = (
-            step_data_df.groupby("step_name")["duration_seconds"]
-            .mean()
-            .reset_index()
-            .sort_values(by="duration_seconds", ascending=False)
-        )
-        st.bar_chart(
-            data=avg_durations,
-            x="step_name",
-            y="duration_seconds",
-            use_container_width=True
-        )
-
-
-# 🕐 3. OPERATIONAL BASHARES & GLOBAL SYSTEM ERROR AUDITS
-st.markdown("---")
-col_obs_left, col_obs_right = st.columns(2)
-
-with col_obs_left:
-    st.subheader("🕐 Last Successful Run Baseline")
-    if last_success_df.empty:
-        st.info("No successful ingestion batch runs registered inside historical catalogs.")
-    else:
-        st.dataframe(
-            last_success_df,
-            use_container_width=True,
-            hide_index=True
-        )
-
-with col_obs_right:
-    st.subheader("⚠️ Failed Pipeline Steps Log")
-    if failed_steps_df.empty:
-        st.success("✅ **System Clean:** No failed pipeline sub-stage steps found on disk.")
-    else:
-        st.warning(f"🚨 **{len(failed_steps_df)} Faulty Sub-Task Executions Flagged!**")
-        st.dataframe(
-            failed_steps_df[["run_id", "step_name", "status", "error_message", "completed_at"]],
-            use_container_width=True,
-            hide_index=True
-        )
-
-
-# 🕵️‍♂️ 4. INTERACTIVE INCIDENT TRACEABILITY ROOM
-st.markdown("---")
-st.header("🕵️‍♂️ Granular Ingestion Run Traceability Engine")
-
-if available_runs_df.empty:
-    st.info("No active pipeline execution logs found on disk to investigate.")
-else:
-    run_ids = available_runs_df["run_id"].tolist()
-    selected_run_id = st.selectbox(
-        "🔎 Choose an Execution Run ID to trace sub-stage operational data frames:",
-        options=run_ids,
-        index=0
-    )
-    
-    if selected_run_id:
-        run_details_df = get_run_details(selected_run_id)
-        
-        if not run_details_df.empty:
-            run_row = run_details_df.iloc[0]
-            
-            st.markdown(f"#### 📊 Execution Context Summary — Run #{selected_run_id}")
-            col_id, col_stat, col_rec = st.columns(3)
-            with col_id:
-                st.metric("Run ID Target", f"#{selected_run_id}")
-            with col_stat:
-                st.metric("Batch Execution Status", str(run_row["status"]))
-            with col_rec:
-                st.metric("Total Records Ingested", f"{int(run_row['records_processed'] or 0):,}")
-            
-            # Extract and display steps parameterised by selection
-            with st.spinner(f"Querying sub-stage tables for Run #{selected_run_id}..."):
-                steps_df = get_run_steps(selected_run_id)
-                duration_df = get_run_step_durations(selected_run_id)
-                
-            st.markdown(f"##### ⏱️ Sub-Stage Step Telemetry Matrix — Run #{selected_run_id}")
-            if steps_df.empty:
-                st.info("ℹ️ No granular micro-stage tasks registered for this specific run ID yet.")
-            else:
-                st.dataframe(
-                    steps_df[["step_id", "step_name", "status", "records_processed", "started_at", "completed_at"]],
-                    use_container_width=True,
-                    hide_index=True
-                )
-                
-                # Render specific sub-stage errors inline
-                for _, step in steps_df.iterrows():
-                    if step["status"] == "FAILED" and step["error_message"]:
-                        st.error(f"❌ **Crash Trace in Step '{step['step_name']}':** {step['error_message']}")
-
-            # Render global execution errors conditionally
-            if str(run_row["status"]) == "FAILED" and pd.notna(run_row.get("error_message")):
-                st.error(f"🚨 **Global Pipeline Failure Traceback:** {run_row['error_message']}")
-
-            # Render high-resolution chronological flow map timeline
-            st.markdown(f"##### ⏳ Chronological Execution Timeline Flow — Run #{selected_run_id}")
-            if duration_df.empty:
-                st.info("No completed micro-stage logs found to plot chronological traces.")
-            else:
-                timeline_items = []
-                for _, step in duration_df.iterrows():
-                    st_time = str(step["started_at"])[11:19]
-                    dur_sec = float(step["duration_seconds"] or 0)
-                    status_icon = "✅" if step["status"] == "SUCCESS" else "❌"
-                    timeline_items.append(
-                        f"⏱️ `{st_time}` ──► **{step['step_name'].upper()}** "
-                        f"[{status_icon} {step['status']}] ── Processing: `{step['records_processed']}` rows "
-                        f"— Duration: `{dur_sec:.2f}s`"
-                    )
-                st.markdown("\n\n".join(timeline_items))
-                
-                with st.expander("Expose Raw Time Interval Parameters Mapping"):
-                    st.dataframe(
-                        duration_df[["step_name", "status", "records_processed", "duration"]],
-                        use_container_width=True,
-                        hide_index=True
-                    )
-        else:
-            st.error("Unable to extract details for the selected run token.")
-# ==============================================================================
-# 📊 DATA QUALITY COMPLIANCE BOARD PANEL (Day 132 Core Feature Integration)
-# ==============================================================================
-st.markdown("---")
-st.header("🎯 Data Quality Compliance Board")
-
-from src.dashboard.monitoring import (
-    get_quality_failure_rates,
-    get_latest_quality_status,
-    get_quality_run_summary
-)
-
-# 1. Fetch historical compliance data blocks from your data-access layer [INDEX]
-try:
-    dq_summary_df = get_quality_run_summary()
-    dq_latest_df = get_latest_quality_status()
-    dq_failures_df = get_quality_failure_rates()
-except Exception as exc:
-    st.error(f"Encountered a resource error loading data quality history frames: {exc}")
-    st.stop()
-
-if dq_summary_df.empty and dq_latest_df.empty:
-    st.info("No historical data quality validation records found on disk to populate trends.")
-else:
-    # --- UI CONTAINER 1: CORE AGGREGATE KPI SCORECARDS ---
-    total_checks_count = len(dq_latest_df) if not dq_latest_df.empty else 0
-    
-    passed_count = 0
-    warning_count = 0
-    failure_count = 0
-    
-    if not dq_latest_df.empty:
-        passed_count = len(dq_latest_df[dq_latest_df["status"] == "PASS"])
-        warning_count = len(dq_latest_df[dq_latest_df["status"] == "WARNING"])
-        failure_count = len(dq_latest_df[dq_latest_df["status"] == "FAIL"])
-
-    col_dq1, col_dq2, col_dq3, col_dq4 = st.columns(4)
-    with col_dq1:
-        st.metric("Active Rules Monitored", total_checks_count)
-    with col_dq2:
-        st.metric("Rules Passing (PASS)", passed_count, delta="🟢 Nominal")
-    with col_dq3:
-        st.metric("Sub-Critical Warnings", warning_count, delta="🟡 Review Needed" if warning_count > 0 else "✨ 0 Warnings", delta_color="inverse" if warning_count > 0 else "normal")
-    with col_dq4:
-        st.metric("Critical Blocks (FAIL)", failure_count, delta="🚨 Breach Active" if failure_count > 0 else "✅ Clean", delta_color="inverse")
-
-    # --- UI CONTAINER 2: LONGITUDINAL HISTORY TRENDS & REPETITION FALLOUT RATES ---
-    st.markdown("---")
-    col_trend, col_rates = st.columns(2)
-    
-    with col_trend:
-        st.subheader("📈 Quality Status Over Time")
-        if dq_summary_df.empty:
-            st.info("Insufficient runtime iterations to draw multi-batch quality timelines.")
-        else:
-            # Map running totals into interactive area or bar chart matrices [INDEX]
-            chart_data = dq_summary_df.set_index("run_id")[["passed", "warnings", "failures"]]
-            st.bar_chart(chart_data, use_container_width=True)
-            st.caption("Historical trace showing compliance counts mapped per unique execution batch run ID.")
-
-    with col_rates:
-        st.subheader("🧮 Failure Rate By Quality Check")
-        if dq_failures_df.empty:
-            st.info("No historical metric failures tracked across system rules.")
-        else:
-            # Render a neat bar chart to plot distinct category densities [INDEX]
-            st.bar_chart(
-                data=dq_failures_df,
-                x="check_name",
-                y="failure_rate_pct",
-                use_container_width=True
-            )
-            st.caption("Percentage rate indicating which rule family breaches constraints most frequently.")
-
-    # --- UI CONTAINER 3: HIGH-WATERMARK RESULTS MATRIX GRID ---
-    st.markdown("---")
-    st.subheader("📋 Latest Quality Validation Results Matrix")
-    if dq_latest_df.empty:
-        st.info("No baseline quality records returned.")
-    else:
-        # Better UI Pattern: Map data-responsive styling to tables based on column values [INDEX]
-        def style_status_row(val):
-            if val == "PASS":
-                return "background-color: rgba(46, 204, 113, 0.15); color: #2ecc71;"
-            elif val == "WARNING":
-                return "background-color: rgba(241, 196, 15, 0.15); color: #f1c40f;"
-            return "background-color: rgba(231, 76, 60, 0.15); color: #e74c3c;"
-
-        try:
-            styled_latest = dq_latest_df[["check_name", "status", "check_value", "failed_records", "checked_at"]].style.applymap(
-                style_status_row, subset=["status"]
-            )
-            st.dataframe(styled_latest, use_container_width=True, hide_index=True)
-        except Exception:
-            # Fallback to standard dataframe if style engine encounters pandas environment discrepancies
-            st.dataframe(dq_latest_df[["check_name", "status", "check_value", "failed_records", "checked_at"]], use_container_width=True, hide_index=True)
-# ==============================================================================
-# 🎯 CONTAINER LAYER: Configurable Data Quality Compliance Board
-# ==============================================================================
-st.markdown("---")
-st.header("🎯 Data Quality Compliance Board")
-
-
-
-# 15. Load Data Assets Chronologically first to establish clean decoupling [INDEX]
-try:
-    summary_df = get_quality_summary()
-    failure_rates_df = get_quality_failure_rates()
-    history_df = get_quality_history()
-    latest_quality_df = get_latest_quality_status()
-except Exception as exc:
-    st.error(f"Encountered a resource error loading data quality history frames: {exc}")
-    st.stop()
-
-if summary_df.empty or latest_quality_df.empty:
-    st.info("No historical data quality validation records found on disk to populate dashboards.")
-else:
-    # --- 1. Top-Level Summary Metrics Row ---
-    summary_row = summary_df.iloc[0]
-    total_checks = int(summary_row["total_checks"] or 0)
-    passed = int(summary_row["passed"] or 0)
-    warnings = int(summary_row["warnings"] or 0)
-    failures = int(summary_row["failures"] or 0)
-
-    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    with col_m1:
-        st.metric("Total Rules Checked", f"{total_checks:,}")
-    with col_m2:
-        st.metric("Passed Assertions", f"{passed:,}", delta="🟢 Nominal")
-    with col_m3:
-        st.metric("Warnings Active", f"{warnings:,}", 
-                  delta=f"🟡 {warnings} Flags" if warnings > 0 else "✨ 0 Flags", 
-                  delta_color="inverse" if warnings > 0 else "normal")
-    with col_m4:
-        st.metric("Critical Failure Blocks", f"{failures:,}", 
-                  delta=f"🚨 {failures} Breaches" if failures > 0 else "✅ Clean", 
-                  delta_color="inverse")
-
-    # --- 2. Historical Failure Rates & Trend Analysis ---
-    st.markdown("---")
-    col_rates, col_trend = st.columns(2)
-    
-    with col_rates:
-        st.subheader("📉 Historical Rule Failure Rates")
-        if failure_rates_df.empty:
-            st.info("No failure metrics tracked across system rules.")
-        else:
-            st.dataframe(failure_rates_df, use_container_width=True, hide_index=True)
-
-    with col_trend:
-        st.subheader("📈 Metric Trend Analysis Over Time")
-        if history_df.empty:
-            st.info("Insufficient historical iterations to plot timelines.")
-        else:
-            available_checks = sorted(history_df["check_name"].dropna().unique().tolist())
-            selected_check = st.selectbox("🔎 Select a check family to map trend lines:", options=available_checks)
-            if selected_check:
-                selected_history = history_df[history_df["check_name"] == selected_check]
-                st.line_chart(selected_history.set_index("run_id")["check_value"], use_container_width=True)
-
-    # --- 3. 🎛️ Interactive Status Selector & Latest Quality Table ---
-    st.markdown("---")
-    st.subheader("📋 Latest Quality Validation Results")
-    
-    # 14. Inject a clean status selection dropdown filter [INDEX]
-    status_filter = st.selectbox(
-        "Filter Latest Records by Compliance Status:",
-        options=["ALL", "PASS", "WARNING", "FAIL"],
-        index=0
-    )
-    
-    # Perform defensive duplication slice operation [INDEX]
-    filtered_quality = latest_quality_df.copy()
-    if status_filter != "ALL":
-        filtered_quality = filtered_quality[filtered_quality["status"] == status_filter]
-        
-    if filtered_quality.empty:
-        st.info(f"✨ No active latest quality records match the filter criteria: `{status_filter}`")
-    else:
-        st.dataframe(
-            filtered_quality[["check_name", "status", "check_value", "failed_records", "checked_at"]],
-            use_container_width=True,
-            hide_index=True
-        )
-# ==============================================================================
-# 🕵️‍♂️ UNIFIED ROOT-CAUSE DRILL-DOWN COCKPIT (Day 133 Multi-Table Join View)
-# ==============================================================================
-from src.dashboard.monitoring import get_run_quality_details
-
-# Locate where steps_df and duration_df are fetched inside your selected_run_id block,
-# and add the data quality drill-down retrieval loop [INDEX]:
-if selected_run_id:
-    # (Your existing get_run_details, get_run_steps, and get_run_step_durations calls are here) [INDEX]
-    with st.spinner(f"Extracting unified metrics for Run #{selected_run_id}..."):
-        run_dq_details_df = get_run_quality_details(selected_run_id)
-
-    # --- TABULAR DRILL-DOWN VIEW NAVIGATION ---
-    st.markdown("### 🔍 Root-Cause Investigation Desk")
-    tab_steps, tab_quality = st.tabs(["⚙️ Internal Pipeline Steps", "🎯 Data Quality Assertions"])
-    
-    with tab_steps:
-        st.markdown(f"#### ⏱️ Sub-Stage Step Telemetry Matrix — Run #{selected_run_id}")
-        if steps_df.empty:
-            st.info("No sub-stage execution steps logged for this run.")
-        else:
-            st.dataframe(
-                steps_df[["step_id", "step_name", "status", "records_processed", "started_at", "completed_at"]],
-                use_container_width=True, hide_index=True
-            )
-            
-            # Display inline step execution crash errors [INDEX]
-            for _, step in steps_df.iterrows():
-                if step["status"] == "FAILED" and step["error_message"]:
-                    st.error(f"❌ **Crash Trace in Step '{step['step_name']}':** {step['error_message']}")
-
-    with tab_quality:
-        st.markdown(f"#### 🎯 Data Quality Audit Ledger Snapshots — Run #{selected_run_id}")
-        if run_dq_details_df.empty:
-            st.success("✅ **System Clean:** No data quality anomalies or breaches logged for this run execution.")
-        else:
-            # Better UI Pattern: Conditionally alert operations teams on failure rows [INDEX]
-            has_dq_failure = not run_dq_details_df[run_dq_details_df["status"] == "FAIL"].empty
-            if has_dq_failure:
-                st.error("🚨 **Critical Data Quality Breach Tracked for this Run!** Data quality rules were violated.")
-                
-            st.dataframe(
-                run_dq_details_df[["check_name", "status", "records_checked", "failed_records", "check_value", "message"]],
-                use_container_width=True, hide_index=True
-            )
-# ==============================================================================
-# 🕵️‍♂️ UNIFIED ROOT-CAUSE DRILL-DOWN COCKPIT (Day 133 Interface Layout)
-# ==============================================================================
-
-st.markdown("---")
-st.header("🕵️‍♂️ Granular Ingestion Run Traceability Engine")
-
-# 11. Retrieve available runs for dropdown select list inputs [INDEX]
-try:
-    available_runs_df = get_available_runs()
-except Exception as exc:
-    st.error(f"Unable to synchronize interactive select components: {exc}")
-    st.stop()
-
-if available_runs_df.empty:
-    st.info("No active pipeline execution logs found on disk to investigate.")
-else:
-    # 12. Create the unified run selector dropdown filter menu [INDEX]
-    run_ids_list = available_runs_df["run_id"].tolist()
-    selected_run_id = st.selectbox(
-        "🔎 Choose an Ingestion Run ID to investigate multi-table metadata logs:",
-        options=run_ids_list,
-        index=0
-    )
-    
-    if selected_run_id:
-        # 10. Combine the Investigation Flow under a single shared run key parameter [INDEX]
-        with st.spinner(f"Synchronizing cross-tier logs for Run #{selected_run_id}..."):
-            run_details_df = get_run_details(selected_run_id)
-            steps_df = get_run_steps(selected_run_id)
-            quality_df = get_run_quality(selected_run_id)
-
-        # 13. Conditionally display top-level metrics headers [INDEX]
-        if run_details_df.empty:
-            st.warning(f"⚠️ No master context details found for Run #{selected_run_id}.")
-        else:
-            run_row = run_details_df.iloc[0]
-            
-            st.markdown(f"#### 📊 Execution Context Summary — Run #{selected_run_id}")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Run ID Target", f"#{run_row['run_id']}")
-            with col2:
-                # Changes color dynamically depending on string values [INDEX]
-                st.metric("Batch Execution Status", str(run_row["status"]))
-            with col3:
-                st.metric("Total Records Processed", f"{int(run_row['records_processed'] or 0):,}")
-
-            # Conditionally expose unhandled global stack trace logs if active [INDEX]
-            if str(run_row["status"]) == "FAILED" and pd.notna(run_row.get("error_message")):
-                st.error(f"🚨 **Global Pipeline Failure Traceback:** {run_row['error_message']}")
-
-            # Render Sub-Stage Tasks and Quality Assertions grids cleanly
-            st.markdown("##### ⚙️ Internal Sub-Stage Step Performance")
-            if steps_df.empty:
-                st.info("No sub-stage execution steps logged for this run.")
-            else:
-                st.dataframe(steps_df[["step_name", "status", "records_processed", "started_at"]], use_container_width=True, hide_index=True)
-
-            st.markdown("##### 🎯 Data Quality Assertions Ledger")
-            if quality_df.empty:
-                st.success("✅ **System Clean:** No data quality anomalies or breaches logged for this run.")
-            else:
-                st.dataframe(quality_df[["check_name", "status", "records_checked", "failed_records", "check_value", "message"]], use_container_width=True, hide_index=True)
-# ==============================================================================
-# 🚨 TRAGE VIEW: Isolated Fault Matrix & Layered Failure Audit (Day 133 Final)
-# ==============================================================================
-from src.dashboard.monitoring import get_available_runs, get_run_details, get_run_steps, get_run_quality
-
-st.markdown("---")
-st.header("🕵️‍♂️ Granular Ingestion Run Traceability Engine")
-
-try:
-    available_runs_df = get_available_runs()
-except Exception as exc:
-    st.error(f"Unable to synchronize interactive select components: {exc}")
-    st.stop()
-
-if available_runs_df.empty:
-    st.info("No active pipeline execution logs found on disk to investigate.")
-else:
-    run_ids_list = available_runs_df["run_id"].tolist()
-    selected_run_id = st.selectbox(
-        "🔎 Choose an Ingestion Run ID to investigate multi-table metadata logs:",
-        options=run_ids_list, index=0
-    )
-    
-    if selected_run_id:
-        with st.spinner(f"Synchronizing cross-tier logs for Run #{selected_run_id}..."):
-            run_details_df = get_run_details(selected_run_id)
-            steps_df = get_run_steps(selected_run_id)
-            quality_df = get_run_quality(selected_run_id)
-
-        if run_details_df.empty:
-            st.warning(f"⚠️ No master context details found for Run #{selected_run_id}.")
-        else:
-            run_row = run_details_df.iloc[0]
-            
-            st.markdown(f"#### 📊 Execution Context Summary — Run #{selected_run_id}")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Run ID Target", f"#{run_row['run_id']}")
-            with col2:
-                st.metric("Batch Execution Status", str(run_row["status"]))
-            with col3:
-                st.metric("Total Records Processed", f"{int(run_row['records_processed'] or 0):,}")
-
-            # ==================================================================
-            # ⚙️ 14 & 16. DISPLAY AND HIGHLIGHT FAILED PIPELINE STEPS
-            # ==================================================================
-            st.markdown("---")
-            st.subheader("⚙️ Pipeline Steps Lifecycle Status")
-            if steps_df.empty:
-                st.info("No sub-stage execution steps logged for this run.")
-            else:
-                # Isolate failing execution blocks cleanly using boolean slicing indexing [INDEX]
-                failed_steps = steps_df[steps_df["status"].isin(["FAILED", "FAIL"])]
-                
-                if failed_steps.empty:
-                    st.success("✅ **Infrastructure Clean:** All software transformation steps executed without unhandled technical errors [INDEX].")
-                else:
-                    st.error(f"⚠️ **{len(failed_steps)} Technical Step Failure(s) Tracked!** Review infrastructure parameters below:")
-                    st.dataframe(failed_steps[["step_name", "status", "error_message", "completed_at"]], use_container_width=True, hide_index=True)
-                
-                # Expose full step runtime matrix for chronological performance audit
-                with st.expander("Expose Complete Internal Step Performance Grid"):
-                    st.dataframe(steps_df[["step_name", "status", "records_processed", "started_at", "completed_at"]], use_container_width=True, hide_index=True)
-
-            # ==================================================================
-            # 🎯 15 & 16. DISPLAY AND HIGHLIGHT DATA QUALITY BREACHES
-            # ==================================================================
-            st.markdown("---")
-            st.subheader("🎯 Data Quality Assertions Status")
-            if quality_df.empty:
-                # 17. Distinguish: If pipeline failed early, quality rows will run completely blank [INDEX]
-                if str(run_row["status"]) in ["FAILED", "FAIL"]:
-                    st.warning("⚠️ **No Data Quality Results:** The software crashed or aborted before quality gates could execute [INDEX].")
-                else:
-                    st.info("ℹ️ No data quality verification records populated for this execution run yet.")
-            else:
-                # Isolate failing validation check rows cleanly using boolean slicing indexing [INDEX]
-                failed_quality = quality_df[quality_df["status"] == "FAIL"]
-                warning_quality = quality_df[quality_df["status"] == "WARNING"]
-                
-                if failed_quality.empty:
-                    st.success("✅ **Data Quality Clean:** No critical quality breaches found on disk for this run [INDEX].")
-                else:
-                    st.error(f"❌ **{len(failed_quality)} Critical Data Quality Rule Breach(es) Flagged!**")
-                    st.dataframe(failed_quality[["check_name", "status", "failed_records", "check_value", "message"]], use_container_width=True, hide_index=True)
-                
-                if not warning_quality.empty:
-                    st.warning(f"⚠️ **{len(warning_quality)} Sub-Critical Data Quality Warning(s) Registered:**")
-                    st.dataframe(warning_quality[["check_name", "status", "failed_records", "check_value", "message"]], use_container_width=True, hide_index=True)
-
-                # Expose full quality results matrix
-                with st.expander("Expose Complete Data Quality Results Ledger"):
-                    st.dataframe(quality_df[["check_name", "status", "records_checked", "failed_records", "check_value", "message"]], use_container_width=True, hide_index=True)
-# ==============================================================================
-# 🚨 CONTAINER LAYER: Incident Command Center & Tiered Alert Routing (Day 136 Final)
-# ==============================================================================
-st.markdown("---")
-st.header("🚨 Incident Command Center & Operational Alerting")
-
-
-try:
-    open_count = get_open_incident_count()
-    severity_df = get_open_incidents_by_severity()
-    open_incidents_list_df = get_open_incidents()
-except Exception as exc:
-    st.error(f"Unable to synchronize live operational incident summaries: {exc}")
-    st.stop()
-
-# --- 17. ENFORCE TIERED OPERATIONAL IN-DASHBOARD ALERTING ---
-if open_incidents_list_df is not None and not open_incidents_list_df.empty:
-    # Filter out highly critical vs sub-critical open incidents in memory
-    high_severity_alerts = open_incidents_list_df[open_incidents_list_df["severity"] == "HIGH"]
-    medium_low_alerts = open_incidents_list_df[open_incidents_list_df["severity"].isin(["MEDIUM", "LOW"])]
-    
-    # Trigger urgent errors for high-severity alerts [INDEX]
-    if not high_severity_alerts.empty:
-        st.error(f"🔥 **CRITICAL CALLOUT:** {len(high_severity_alerts)} high-severity incident(s) are currently OPEN and require immediate engineering triage.")
-        
-    # Trigger warnings for medium/low issues [INDEX]
-    if not medium_low_alerts.empty:
-        st.warning(f"⚠️ **OPERATIONAL NOTICE:** {len(medium_low_alerts)} medium or low-severity incident(s) require engineering attention.")
-else:
-    st.success("✨ **SLA TARGET MET:** All platform data quality constraints and pipeline stages are currently nominal.")
-
-# --- 2. Render Severity Summary Scorecards ---
-st.markdown("#### 🚦 Active Incidents Stratification by Severity")
-high_count = 0
-medium_count = 0
-low_count = 0
-
-if severity_df is not None and not severity_df.empty:
-    for _, row in severity_df.iterrows():
-        sev_name = str(row["severity"]).upper()
-        sev_total = int(row["total"] or 0)
-        if sev_name == "HIGH":
-            high_count = sev_total
-        elif sev_name == "MEDIUM":
-            medium_count = sev_total
-        elif sev_name == "LOW":
-            low_count = sev_total
-
-col_sev1, col_sev2, col_sev3 = st.columns(3)
-with col_sev1:
-    st.metric("🔥 High Severity", high_count)
-with col_sev2:
-    st.metric("⚠️ Medium Severity", medium_count)
-with col_sev3:
-    st.metric("ℹ️ Low Severity", low_count)
-
-# --- 3. Expose Master Triage Data Grid ---
-if open_incidents_list_df is not None and not open_incidents_list_df.empty:
-    st.markdown("##### 🔴 Active Triage Queue Logs")
-    st.dataframe(
-        open_incidents_list_df[["incident_id", "run_id", "check_name", "severity", "message", "created_at"]],
-        use_container_width=True, hide_index=True
-    )
-
-    # Fetch the communication logs dataframe downstream parameterised by your choice [INDEX]
-    from src.dashboard.monitoring import get_incident_notifications
-
-    # Locate your select_run_id / active incidents display block and add:
-    run_incidents_query = "SELECT incident_id FROM pipeline_incidents WHERE run_id = :run_id LIMIT 1;"
-
-    # Assuming you pull the incident_id linked to the chosen run:
-    with engine.connect() as conn:
-        active_inc_id = conn.execute(
-            text(run_incidents_query),
-            {"run_id": selected_run_id}
-        ).scalar()
-
-    # Update your st.tabs instantiation line:
-    tab_steps, tab_quality, tab_notifs = st.tabs(
-        ["⚙️ Pipeline Steps", "🎯 Quality Checks", "🔔 Notification History"]
-    )
-
-    with tab_notifs:
-        st.markdown(f"#### 🔔 Alert Dispatch History Log — Run #{selected_run_id}")
-        if not active_inc_id:
-            st.success("✅ **Zero Alerts Dispatched:** No operational failures occurred, so no alerts were sent.")
-        else:
-            notif_history_df = get_incident_notifications(int(active_inc_id))
-            if notif_history_df.empty:
-                st.info("No alert dispatch snapshots logged for this specific incident context.")
-            else:
-                st.dataframe(
-                    notif_history_df[
-                        [
-                            "notification_id",
-                            "channel",
-                            "delivery_status",
-                            "recipient",
-                            "dispatched_at",
-                            "error_message",
-                        ]
-                    ],
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-# ==============================================================================
-# 🎛️ CONTAINER LAYER: Event Processing Observability & Worker Monitoring (Day 148 Final)
-# ==============================================================================
-st.markdown("---")
-st.header("🎛️ Event Processing & Worker Telemetry Cockpit")
-
-from src.dashboard.monitoring import (
-    get_unified_event_processing_telemetry,
-    get_worker_nodes_heartbeat_ledger,
-    get_detailed_event_lag_and_retry_metrics
-)
-
-try:
-    telemetry_df = get_unified_event_processing_telemetry()
-    worker_health_df = get_worker_nodes_heartbeat_ledger()
-    lag_metrics_df = get_detailed_event_lag_and_retry_metrics()
-except Exception as exc:
-    st.error(f"Operational error loading event observability subsystems: {exc}")
-    st.stop()
-
-# Unpack single-pass telemetry metrics safely [INDEX]
-pending_count = 0
-processing_count = 0
-failed_count = 0
-processed_count = 0
-throughput_eps = 0.0
-failure_rate = 0.0
-
-if not telemetry_df.empty:
-    t_row = telemetry_df.iloc[0]
-    pending_count = int(t_row.get("pending") or 0) + int(t_row.get("retry") or 0)
-    processing_count = int(t_row.get("processing") or 0)
-    failed_count = int(t_row.get("failed") or 0)
-    processed_count = int(t_row.get("processed") or 0)
-    throughput_eps = float(t_row.get("processed_per_second") or 0.0)
-    
-    total = int(t_row.get("total_records") or 0)
-    if total > 0:
-        failure_rate = (failed_count / total) * 100.0
-
-# Extract max age lag landmark safely [INDEX]
-max_lag_desc = "0s"
-if not lag_metrics_df.empty:
-    max_seconds = float(lag_metrics_df.iloc[0].get("max_lag_seconds") or 0.0)
-    max_lag_desc = f"{max_seconds/60.0:.1f} min" if max_seconds > 60 else f"{max_seconds:.0f}s"
-
-# --- 16. STREAMLIT METRICS GRID TIER ---
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    st.metric(
-        label="Pending Backlog Queue", 
-        value=pending_count,
-        delta="⚠️ Queue Congestion" if pending_count > 10 else "✨ Queue Healthy",
-        delta_color="inverse" if pending_count > 10 else "normal"
-    )
-
-with col2:
-    st.metric(
-        label="In-Flight Processing", 
-        value=processing_count
-    )
-
-with col3:
-    st.metric(
-        label="Failed / Dead-Lettered", 
-        value=failed_count,
-        delta=f"{failure_rate:.1f}% Fail Rate" if failed_count > 0 else None,
-        delta_color="inverse"
-    )
-
-with col4:
-    st.metric(
-        label="Oldest Pending Age", 
-        value=max_lag_desc
-    )
-
-# Secondary Performance & Throughput Row Panel
-col_perf1, col_perf2 = st.columns(2)
-with col_perf1:
-    st.metric(label="Total Handled Events", value=processed_count)
-with col_perf2:
-    st.metric(label="Consumer Processing Throughput", value=f"{throughput_eps:.2f} eps")
-
-# --- WORKER CLUSTER HEARTBEATS DISPLAY PANEL ---
-st.markdown("#### 🤖 Distributed Consumer Cluster Nodes")
-if worker_health_df.empty:
-    st.info("No active worker node daemon heartbeats logged inside system catalogs.")
-else:
-    worker_health_df["Cluster Status"] = worker_health_df.apply(
-        lambda r: "🔴 STALE / DOWN" if r["heartbeat_age_seconds"] > 15 else "🟢 ACTIVE / RUNNING", axis=1
-    )
-    st.dataframe(
-        worker_health_df[["worker_id", "status", "Cluster Status", "heartbeat_age_seconds", "events_processed", "errors_count"]],
-        use_container_width=True,
-        hide_index=True
-    )
+navigation_router.run()
