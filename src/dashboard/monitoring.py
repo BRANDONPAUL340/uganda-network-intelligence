@@ -14,13 +14,39 @@ if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
 
-def get_pipeline_summary_metrics():
+def get_pipeline_summary_metrics(connection=None):
     """
     Return high-level pipeline and incident metrics using only
     tables and columns that exist in the current PostgreSQL schema.
+
+    An optional connection allows integration tests to execute against
+    the same transaction as their seeded test data.
     """
     try:
-        with engine.connect() as connection:
+        if connection is None:
+            with engine.connect() as connection:
+                pipeline_result = connection.execute(
+                    text("""
+                        SELECT
+                            COUNT(*) AS total_runs,
+                            COUNT(*) FILTER (WHERE status = 'SUCCESS') AS success_runs,
+                            COUNT(*) FILTER (WHERE status = 'FAILED') AS failed_runs,
+                            COUNT(*) FILTER (WHERE status = 'RUNNING') AS running_runs
+                        FROM pipeline_runs
+                    """)
+                ).mappings().one()
+
+                incident_result = connection.execute(
+                    text("""
+                        SELECT
+                            COUNT(*) AS total_incidents,
+                            COUNT(*) FILTER (
+                                WHERE UPPER(status) != 'RESOLVED'
+                            ) AS open_incidents
+                        FROM incidents
+                    """)
+                ).mappings().one()
+        else:
             pipeline_result = connection.execute(
                 text("""
                     SELECT
@@ -86,7 +112,11 @@ def get_recent_pipeline_logs(limit: int = 5) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def get_filtered_pipeline_runs(status_filter: str = "All", run_id_filter: str = "All") -> pd.DataFrame:
+def get_filtered_pipeline_runs(
+    status_filter: str = "All",
+    run_id_filter: str = "All",
+    connection=None,
+) -> pd.DataFrame:
     """Filtered Runs Fetcher: Executes filtering and bounding directly within PostgreSQL."""
     try:
         params = {}
@@ -101,7 +131,7 @@ def get_filtered_pipeline_runs(status_filter: str = "All", run_id_filter: str = 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
             
         query = f"""
-            SELECT 
+            SELECT
                 run_id,
                 pipeline_name,
                 current_stage,
@@ -115,7 +145,20 @@ def get_filtered_pipeline_runs(status_filter: str = "All", run_id_filter: str = 
             ORDER BY started_at DESC
             LIMIT 100;
         """
-        return read_query(query, "get_filtered_pipeline_runs", params=params)
+
+        if connection is not None:
+            return pd.read_sql(
+                sql=text(query),
+                con=connection,
+                params=params,
+            )
+
+        return read_query(
+            query,
+            "get_filtered_pipeline_runs",
+            params=params,
+        )
+
     except Exception as exc:
         print(f"🔴 Filtered execution logs driver crash: {exc}")
         return pd.DataFrame()
@@ -158,7 +201,7 @@ def get_pipeline_run_steps_trace(run_id: int) -> pd.DataFrame:
         )
         return pd.DataFrame()
 
-def get_data_quality_summary_metrics() -> dict:
+def get_data_quality_summary_metrics(connection=None) -> dict:
     """Metric Driver: Computes comprehensive pass, warning, and failure aggregates from disk."""
     try:
         query = """
@@ -168,7 +211,14 @@ def get_data_quality_summary_metrics() -> dict:
                 COUNT(CASE WHEN status = 'FAIL' THEN 1 END) as fail_count
             FROM data_quality_results;
         """
-        df = read_query(query, "get_data_quality_summary_metrics")
+        if connection is not None:
+           df = pd.read_sql(text(query), con=connection)
+        else:
+            df = read_query(
+
+                 query,
+                "get_data_quality_summary_metrics",
+            )
         
         passes = int(df["pass_count"].iloc[0]) if not df.empty and pd.notna(df["pass_count"].iloc[0]) else 0
         warnings = int(df["warn_count"].iloc[0]) if not df.empty and pd.notna(df["warn_count"].iloc[0]) else 0
@@ -180,9 +230,11 @@ def get_data_quality_summary_metrics() -> dict:
         return {"status": "ERROR", "pass": 0, "warn": 0, "fail": 0}
 
 
+
 def get_filtered_data_quality_results(
     status_filter: str = "All",
     run_id_filter: str = "All",
+    connection=None,
 ) -> pd.DataFrame:
     """
     Fetch data-quality validation results using the authoritative
@@ -198,7 +250,9 @@ def get_filtered_data_quality_results(
 
         if run_id_filter != "All":
             conditions.append("run_id = :run_id")
-            params["run_id"] = int(run_id_filter.replace("RUN-", ""))
+            params["run_id"] = int(
+                run_id_filter.replace("RUN-", "")
+            )
 
         where_clause = (
             f"WHERE {' AND '.join(conditions)}"
@@ -219,13 +273,19 @@ def get_filtered_data_quality_results(
                 failure_rate_pct,
                 details,
                 checked_at,
-                error_message,
-                severity
+                error_message
             FROM data_quality_results
             {where_clause}
             ORDER BY checked_at DESC
             LIMIT 100;
         """
+
+        if connection is not None:
+            return pd.read_sql(
+                text(query),
+                con=connection,
+                params=params,
+            )
 
         return read_query(
             query,
@@ -239,8 +299,14 @@ def get_filtered_data_quality_results(
         )
         return pd.DataFrame()
 
+    except Exception as exc:
+        print(
+            f"Data quality filter log pipeline extraction failure: {exc}"
+        )
+        return pd.DataFrame()
 
-def get_incidents_summary_metrics() -> dict:
+
+def get_incidents_summary_metrics(connection=None) -> dict:
     """
     Return incident summary metrics using the authoritative
     incidents schema.
@@ -261,10 +327,13 @@ def get_incidents_summary_metrics() -> dict:
             FROM incidents;
         """
 
-        df = read_query(
-            query,
-            "get_incidents_summary_metrics",
-        )
+        if connection is not None:
+            df = pd.read_sql(text(query), con=connection)
+        else:
+            df = read_query(
+                query,
+                "get_incidents_summary_metrics",
+            )
 
         if df.empty:
             return {
@@ -299,6 +368,7 @@ def get_incidents_summary_metrics() -> dict:
 def get_filtered_incidents_logs(
     status_filter: str = "All",
     severity_filter: str = "All",
+    connection=None,
 ) -> pd.DataFrame:
     """
     Fetch incident records using the authoritative incidents schema.
@@ -338,6 +408,13 @@ def get_filtered_incidents_logs(
             LIMIT 100;
         """
 
+        if connection is not None:
+            return pd.read_sql(
+                text(query),
+                con=connection,
+                params=params,
+            )
+
         return read_query(
             query,
             "get_filtered_incidents_logs",
@@ -350,43 +427,70 @@ def get_filtered_incidents_logs(
         )
         return pd.DataFrame()
 
-def get_event_workers_summary_metrics() -> dict:
-    """Computes comprehensive aggregates for emitted events and backoff retries safely from disk."""
+
+def get_event_workers_summary_metrics(connection=None) -> dict:
+    """Summarize event-store and processing-worker metrics."""
     try:
-        store_query = "SELECT COUNT(*) as total_evts FROM pipeline_event_store;"
+        store_query = """
+            SELECT COUNT(*) AS total_evts
+            FROM pipeline_event_store;
+        """
 
         proc_query = """
             SELECT
-                COUNT(CASE WHEN status = 'PROCESSED' THEN 1 END) as success_evts,
-                COUNT(CASE WHEN status = 'FAILED' THEN 1 END) as failed_evts,
-                SUM(COALESCE(retry_count, 0)) as total_retries
+                COUNT(CASE WHEN status = 'PROCESSED' THEN 1 END)
+                    AS success_evts,
+                COUNT(CASE WHEN status = 'FAILED' THEN 1 END)
+                    AS failed_evts,
+                COALESCE(SUM(attempt_count), 0)
+                    AS total_retries
             FROM event_processing;
         """
 
-        store_df = read_query(store_query, "get_total_events_count")
-        proc_df = read_query(proc_query, "get_processing_worker_aggregates")
+        if connection is not None:
+            store_df = pd.read_sql(
+                text(store_query),
+                con=connection,
+            )
+            proc_df = pd.read_sql(
+                text(proc_query),
+                con=connection,
+            )
+        else:
+            store_df = read_query(
+                store_query,
+                "get_total_events_count",
+            )
+            proc_df = read_query(
+                proc_query,
+                "get_processing_worker_aggregates",
+            )
 
         total = (
             int(store_df["total_evts"].iloc[0])
-            if not store_df.empty and pd.notna(store_df["total_evts"].iloc[0])
+            if not store_df.empty
+            and pd.notna(store_df["total_evts"].iloc[0])
             else 0
         )
 
         success = (
             int(proc_df["success_evts"].iloc[0])
-            if not proc_df.empty and pd.notna(proc_df["success_evts"].iloc[0])
+            if not proc_df.empty
+            and pd.notna(proc_df["success_evts"].iloc[0])
             else 0
         )
 
         failed = (
             int(proc_df["failed_evts"].iloc[0])
-            if not proc_df.empty and pd.notna(proc_df["failed_evts"].iloc[0])
+            if not proc_df.empty
+            and pd.notna(proc_df["failed_evts"].iloc[0])
             else 0
         )
 
         retries = (
             int(proc_df["total_retries"].iloc[0])
-            if not proc_df.empty and pd.notna(proc_df["total_retries"].iloc[0])
+            if not proc_df.empty
+            and pd.notna(proc_df["total_retries"].iloc[0])
             else 0
         )
 
@@ -409,11 +513,13 @@ def get_event_workers_summary_metrics() -> dict:
         }
 
 
+
 def get_filtered_events_ledger(
     type_filter: str = "All",
     status_filter: str = "All",
+    connection=None,
 ) -> pd.DataFrame:
-    """Combines append-only log maps and worker state registers to filter streaming queues safely."""
+    """Filter event records and include their processing status."""
     try:
         params = {}
         conditions = []
@@ -426,7 +532,11 @@ def get_filtered_events_ledger(
             conditions.append("p.status = :status")
             params["status"] = status_filter
 
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        where_clause = (
+            f"WHERE {' AND '.join(conditions)}"
+            if conditions
+            else ""
+        )
 
         query = f"""
             SELECT
@@ -434,18 +544,30 @@ def get_filtered_events_ledger(
                 s.event_type,
                 s.run_id,
                 s.producer,
-                s.created_at,
-                COALESCE(p.status, 'PENDING') as status,
-                COALESCE(p.retry_count, 0) as retry_count,
+                s.event_time,
+                COALESCE(p.status, 'PENDING') AS status,
+                COALESCE(p.attempt_count, 0) AS attempt_count,
                 p.processed_at
             FROM pipeline_event_store s
-            LEFT JOIN event_processing p ON s.event_id = p.event_id
+            LEFT JOIN event_processing p
+                ON s.event_id = p.event_id
             {where_clause}
-            ORDER BY s.created_at DESC
+            ORDER BY s.event_time DESC
             LIMIT 100;
         """
 
-        return read_query(query, "get_filtered_events_ledger", params=params)
+        if connection is not None:
+            return pd.read_sql(
+                text(query),
+                con=connection,
+                params=params,
+            )
+
+        return read_query(
+            query,
+            "get_filtered_events_ledger",
+            params=params,
+        )
 
     except Exception as exc:
         print(f"Filtered event queue extraction crash: {exc}")
@@ -495,13 +617,12 @@ def get_lineage_summary_metrics() -> dict:
         }
 
 
+
 def get_filtered_pipeline_lineage_logs(
     run_id_filter: str = "All",
+    connection=None,
 ) -> pd.DataFrame:
-    """
-    Fetch pipeline lineage records using the authoritative
-    pipeline_lineage schema.
-    """
+    """Fetch lineage records using the authoritative schema."""
     try:
         params = {}
         conditions = []
@@ -532,6 +653,13 @@ def get_filtered_pipeline_lineage_logs(
             LIMIT 100;
         """
 
+        if connection is not None:
+            return pd.read_sql(
+                text(query),
+                con=connection,
+                params=params,
+            )
+
         return read_query(
             query,
             "get_filtered_pipeline_lineage_logs",
@@ -539,11 +667,9 @@ def get_filtered_pipeline_lineage_logs(
         )
 
     except Exception as exc:
-        print(
-            f"Pipeline lineage extraction failure: {exc}"
-        )
+        print(f"Pipeline lineage extraction failure: {exc}")
         return pd.DataFrame()
-
+    
 # ==============================================================================
 # OPTIMIZED TIME-SERIES CACHING LAYERS (Day 238) [INDEX]
 # ==============================================================================
@@ -960,3 +1086,11 @@ def get_worker_nodes_heartbeat_ledger() -> pd.DataFrame:
     except Exception as exc:
         print(f"Worker heartbeat ledger retrieval failure: {exc}")
         return pd.DataFrame()
+
+
+
+
+
+
+
+
