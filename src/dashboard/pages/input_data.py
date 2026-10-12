@@ -80,7 +80,7 @@ def render_input_page():
                         "site_id": site_map[target_site], "download_speed": dl_speed,
                         "upload_speed": ul_speed, "latency": latency, "packet_loss": packet_loss, "signal_strength": rsrp
                     }
-                    success, message = ingest_network_measurement(db_session, payload)
+                    success, message, measurement_id = ingest_network_measurement(db_session, payload)
                     if success:
                         st.success(message)
                     else:
