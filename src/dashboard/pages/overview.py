@@ -117,8 +117,6 @@ with history_col:
             aggfunc="sum",
             fill_value=0,
         )
-
-        
         health_colors = {
             "Critical": CHART_COLORS["failure"],
             "Healthy": CHART_COLORS["success"],
