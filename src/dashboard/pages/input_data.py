@@ -57,8 +57,8 @@ def render_input_page():
         # --- MEASUREMENT FORM ---
         elif info_type == "Network Measurement":
             st.subheader("📊 NETWORK MEASUREMENT")
-            active_nodes = db_session.execute(text("SELECT id, name, district FROM sites ORDER BY name;")).fetchall()
-            site_map = {f"{node.name} ({node.district}) [ID: {node.id}]": node.id for node in active_nodes}
+            active_nodes = db_session.execute(text("SELECT site_id, site_name, district FROM sites ORDER BY site_name;")).fetchall()
+            site_map = {f"{node.site_name} ({node.district}) [ID: {node.site_id}]": node.site_id for node in active_nodes}
             
             if not site_map:
                 st.warning("⚠️ Zero telemetry target points registered. Please insert a baseline Site Node first.")
@@ -89,8 +89,8 @@ def render_input_page():
         # --- INCIDENT FORM ---
         elif info_type == "Incident Information":
             st.subheader("🚨 INCIDENT INFORMATION")
-            active_nodes = db_session.execute(text("SELECT id, name, district FROM sites ORDER BY name;")).fetchall()
-            site_map = {f"{node.name} ({node.district}) [ID: {node.id}]": node.id for node in active_nodes}
+            active_nodes = db_session.execute(text("SELECT site_id, site_name, district FROM sites ORDER BY site_name;")).fetchall()
+            site_map = {f"{node.site_name} ({node.district}) [ID: {node.site_id}]": node.site_id for node in active_nodes}
             
             if not site_map:
                 st.warning("⚠️ Zero incident target nodes registered. Please insert a baseline Site Node first.")
