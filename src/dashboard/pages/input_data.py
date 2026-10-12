@@ -124,7 +124,7 @@ def render_input_page():
                         "severity": severity, "status": status, "started_at": started_at, "resolved_at": resolved_at,
                         "notes": notes.strip() if notes else None
                     }
-                    success, message = ingest_pipeline_incident(db_session, payload)
+                    success, message, incident_id = ingest_pipeline_incident(db_session, payload)
                     if success:
                         st.success(message)
                     else:
