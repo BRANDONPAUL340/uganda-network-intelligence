@@ -8,9 +8,139 @@ from src.dashboard.monitoring import get_pipeline_summary_metrics, get_recent_pi
 from src.dashboard.components.metrics import render_metric_card_grid
 from src.dashboard.components.tables import render_standard_data_grid
 
+from src.dashboard.data import (
+    get_network_summary,
+    get_current_health,
+    get_daily_health,
+)
+
+from src.dashboard.components.charts import (
+    apply_chart_theme,
+    render_line_chart,
+    render_bar_chart,
+    CHART_COLORS,
+)
+
+apply_chart_theme()
+
 st.title("🏠 Platform Overview")
 st.caption("Monitor system-wide data pipelines, infrastructure health, and real-time operational metrics.")
+
+
+# ---------------------------------------------------------
+# NETWORK PERFORMANCE INTELLIGENCE
+# ---------------------------------------------------------
+
 st.markdown("---")
+st.subheader("🌍 Network Performance Intelligence")
+st.caption(
+    "Aggregate measurements and recorded network-health status "
+    "from the existing database."
+)
+
+network_summary_df = get_network_summary()
+health_df = get_current_health()
+daily_health_df = get_daily_health()
+
+if not network_summary_df.empty:
+    summary = network_summary_df.iloc[0]
+
+    def display_metric(value, suffix="", decimals=2):
+        """Format a real measurement, or show N/A if unavailable."""
+        if pd.isna(value):
+            return "N/A"
+        return f"{float(value):,.{decimals}f}{suffix}"
+
+    k1, k2, k3, k4 = st.columns(4)
+
+    k1.metric(
+        "Sites Reporting",
+        display_metric(summary.get("total_sites"), decimals=0),
+    )
+    k2.metric(
+        "Average Availability",
+        display_metric(summary.get("avg_availability_pct"), "%"),
+    )
+    k3.metric(
+        "Average Latency",
+        display_metric(summary.get("avg_latency_ms"), " ms"),
+    )
+    k4.metric(
+        "Average Packet Loss",
+        display_metric(summary.get("avg_packet_loss_pct"), "%"),
+    )
+
+    st.caption(
+        "Averages are calculated from available stored measurements; "
+        "they may not represent every site equally."
+    )
+else:
+    st.info(
+        "Network summary measurements are unavailable. "
+        "Check the database query and whether the silver measurement "
+        "table contains data."
+    )
+
+health_col, history_col = st.columns(2)
+
+with health_col:
+    st.markdown("#### Current Network Health")
+
+    if (
+        not health_df.empty
+        and {"health_status", "record_count"}.issubset(health_df.columns)
+    ):
+        health_chart = health_df.set_index("health_status")
+        render_bar_chart(
+             health_chart[["record_count"]],
+             color=CHART_COLORS["secondary"],
+    )
+        st.dataframe(health_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No current network-health records are available.")
+
+with history_col:
+    st.markdown("#### Daily Network Health History")
+
+    if (
+        not daily_health_df.empty
+        and {
+            "health_date",
+            "health_status",
+            "record_count",
+        }.issubset(daily_health_df.columns)
+    ):
+        history_chart = daily_health_df.pivot_table(
+            index="health_date",
+            columns="health_status",
+            values="record_count",
+            aggfunc="sum",
+            fill_value=0,
+        )
+
+        
+        health_colors = {
+            "Critical": CHART_COLORS["failure"],
+            "Healthy": CHART_COLORS["success"],
+            "Warning": CHART_COLORS["warning"],
+        }
+
+        render_line_chart(
+            history_chart,
+            color=[
+                health_colors[status]
+                for status in history_chart.columns
+            ],
+        )
+
+    else:
+        st.info("No daily network-health history is available.")
+
+
+
+st.markdown("---")
+
+
 
 with st.spinner("Fetching operational telemetry from cluster..."):
     metrics = get_pipeline_summary_metrics()
@@ -31,21 +161,29 @@ render_metric_card_grid([
 st.markdown("### ")
 st.markdown("---")
 
-# 1, 4 & 6. Charting Presentation Tier Section
+
+
+# Pipeline processing trends
 st.subheader("📈 National Telemetry Processing Trends Over Time")
+
 if not trend_df.empty:
-    # Restructure dataframe timeline mapping safely for chart consumption
     chart_data = trend_df.copy()
     chart_data["run_date"] = chart_data["run_date"].astype(str)
     chart_data = chart_data.set_index("run_date")
-    
-    # 8. Render success vs failed runs visually over time via a multi-line graph
-    st.line_chart(chart_data[["success_runs", "failed_runs"]], color=["#2ecc71", "#e74c3c"])
+
+    render_line_chart(
+        chart_data[["success_runs", "failed_runs"]],
+        color=[
+            CHART_COLORS["success"],
+            CHART_COLORS["failure"],
+        ],
+    )
 else:
-    st.info("ℹ️ No historical processing trend series found in this cluster database context.")
+    st.info("No historical processing trend series found in this cluster database context.")
 
 st.markdown("---")
 left_panel, right_panel = st.columns(2)
+
 
 with left_panel:
     st.subheader("🔄 Chronological Stream: Recent Pipeline Runs")
