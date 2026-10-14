@@ -258,6 +258,12 @@ pages = {
             title="Incident Management Panel",
             icon="🚨",
         ),
+
+        st.Page(
+            "pages/network_health.py",
+            title="Network Health Intelligence",
+            icon=":material/monitor_heart:",
+        ),
     ],
 
     "🧭 Data Lineage": [
