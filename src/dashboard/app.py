@@ -8,8 +8,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import streamlit as st
-from src.dashboard.monitoring import get_pipeline_summary_metrics
 
+# Initialize and validate environment configuration first.
+import src.config
+
+# Import database-dependent modules only after configuration is ready.
+from src.dashboard.monitoring import get_pipeline_summary_metrics
 # ---------------------------------------------------------------------------
 # Global Page Configuration
 # ---------------------------------------------------------------------------
@@ -264,6 +268,12 @@ pages = {
             title="Network Health Intelligence",
             icon=":material/monitor_heart:",
         ),
+
+        st.Page(
+             "pages/degradation_early_warning.py",
+              title="Degradation Early Warning",
+              icon=":material/trending_up:",
+      ),
     ],
 
     "🧭 Data Lineage": [
@@ -272,6 +282,8 @@ pages = {
             title="Data Lineage Map",
             icon="🧭",
         ),
+
+        
     ],
 
     "📝 Data Operations": [
