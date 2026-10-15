@@ -115,7 +115,7 @@ display_columns = [
 
 st.dataframe(
     filtered_df[display_columns],
-    use_container_width=True,
+    width="stretch",
     hide_index=True,
     column_config={
         "health_score": st.column_config.NumberColumn(

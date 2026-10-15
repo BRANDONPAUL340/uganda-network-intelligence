@@ -47,7 +47,7 @@ def render_line_chart(data, *, color=None, height=320):
         data,
         color=color,
         height=height,
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -64,5 +64,5 @@ def render_bar_chart(data, *, color=None, height=320):
         data,
         color=color,
         height=height,
-        use_container_width=True,
+        width="stretch",
     )

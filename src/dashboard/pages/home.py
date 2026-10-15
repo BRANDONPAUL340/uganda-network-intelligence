@@ -173,7 +173,7 @@ st.markdown(
 if st.button(
     "Open Operations Dashboard",
     type="primary",
-    use_container_width=True,
+    width="stretch",
 ):
     st.switch_page("pages/overview.py")
 

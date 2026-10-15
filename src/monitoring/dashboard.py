@@ -116,7 +116,7 @@ try:
 
             st.dataframe(
                 df_stages[available_columns],
-                use_container_width=True,
+                width="stretch",
                 hide_index=True
             )
 
@@ -142,7 +142,7 @@ try:
 
             st.plotly_chart(
                 fig,
-                use_container_width=True
+                width="stretch"
             )
 
 except Exception as e:
