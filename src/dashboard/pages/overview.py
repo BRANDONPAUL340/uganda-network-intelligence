@@ -8,6 +8,16 @@ from src.dashboard.monitoring import get_pipeline_summary_metrics, get_recent_pi
 from src.dashboard.components.metrics import render_metric_card_grid
 from src.dashboard.components.tables import render_standard_data_grid
 
+import altair as alt
+
+with st.expander("Environment diagnostics"):
+    st.write({
+        "Streamlit": st.__version__,
+        "Pandas": pd.__version__,
+        "Altair": alt.__version__,
+        "Python": __import__("sys").version,
+    })
+
 from src.dashboard.data import (
     get_network_summary,
     get_current_health,
@@ -95,7 +105,7 @@ with health_col:
              health_chart[["record_count"]],
              color=CHART_COLORS["secondary"],
     )
-        st.dataframe(health_df, use_container_width=True, hide_index=True)
+        st.dataframe(health_df, width="stretch", hide_index=True)
     else:
         st.info("No current network-health records are available.")
 
