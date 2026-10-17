@@ -4,7 +4,14 @@
 import pandas as pd
 import streamlit as st
 
-from src.dashboard.degradation_data import load_degradation_assessments
+
+from src.monitoring.root_cause_analysis import analyze_network_degradation
+from src.dashboard.degradation_data import (
+    load_degradation_assessments,
+    load_dynamic_degradation_measurements,
+)
+from src.monitoring.degradation_early_warning import detect_degradation
+
 
 
 st.title("Network Degradation Intelligence")
@@ -198,3 +205,153 @@ else:
     st.info(
         "No comparable metric evidence is available for this site."
     )
+
+
+st.divider()
+st.subheader("Dynamic Thresholding & Early Warnings")
+st.caption(
+    "Site-level, same-hour historical baselines detect unusual readings. "
+    "Static safety thresholds remain independent guardrails."
+)
+
+lookback_days = st.selectbox(
+    "Historical baseline lookback",
+    options=[30, 60, 90],
+    index=2,
+    format_func=lambda days: f"Last {days} days",
+    key="dynamic_lookback_days",
+)
+
+try:
+    dynamic_measurements = load_dynamic_degradation_measurements(
+        days=lookback_days
+    )
+    dynamic_assessments = detect_degradation(dynamic_measurements)
+except Exception:
+    st.error(
+        "Dynamic analysis could not load or process historical telemetry. "
+        "The existing site assessments remain available above."
+    )
+    dynamic_assessments = pd.DataFrame()
+
+if dynamic_assessments.empty:
+    st.info(
+        "No dynamic assessments are available for this lookback period. "
+        "Check historical measurement coverage and timestamps."
+    )
+else:
+    critical_dynamic = int(
+        dynamic_assessments["severity"].eq("CRITICAL").sum()
+    )
+    warning_dynamic = int(
+        dynamic_assessments["severity"].eq("WARNING").sum()
+    )
+    warming_up = int(
+        dynamic_assessments["model_status"].eq("WARMING_UP").sum()
+    )
+    regression_count = int(
+        dynamic_assessments["regression_detected"].fillna(False).sum()
+    )
+
+    metric_col1, metric_col2 = st.columns(2)
+    metric_col1.metric("Dynamic critical signals", critical_dynamic)
+    metric_col2.metric("Dynamic warning signals", warning_dynamic)
+
+    metric_col3, metric_col4 = st.columns(2)
+    metric_col3.metric("Baselines warming up", warming_up)
+    metric_col4.metric("Slow regressions detected", regression_count)
+
+    st.markdown("#### Latest dynamic assessments")
+
+    dynamic_filter = st.multiselect(
+        "Filter dynamic severity",
+        options=["CRITICAL", "WARNING", "INFO"],
+        default=["CRITICAL", "WARNING"],
+        key="dynamic_severity_filter",
+    )
+
+    latest_dynamic = (
+        dynamic_assessments
+        .sort_values("measured_at")
+        .drop_duplicates(
+            subset=["site_id", "metric"],
+            keep="last",
+        )
+    )
+
+    visible_dynamic = latest_dynamic[
+        latest_dynamic["severity"].isin(dynamic_filter)
+    ]
+
+    dynamic_columns = [
+        "site_name",
+        "site_id",
+        "measured_at",
+        "metric",
+        "observed",
+        "expected",
+        "robust_score",
+        "severity",
+        "model_status",
+        "baseline_samples",
+        "baseline_readiness",
+        "seasonality_status",
+        "reason",
+    ]
+
+    st.dataframe(
+        visible_dynamic[dynamic_columns],
+        width="stretch",
+        hide_index=True,
+    )
+
+    st.markdown("#### Slow-regression signals")
+
+    regression_rows = dynamic_assessments[
+        dynamic_assessments["regression_detected"].fillna(False)
+    ].copy()
+
+    if regression_rows.empty:
+        st.info(
+            "No slow regressions met the detector's criteria "
+            "for this lookback period."
+        )
+    else:
+        regression_columns = [
+            "site_name",
+            "site_id",
+            "metric",
+            "observed",
+            "expected",
+            "regression_change_pct",
+            "regression_reason",
+        ]
+
+        st.dataframe(
+            regression_rows[regression_columns],
+            width="stretch",
+            hide_index=True,
+        )
+
+    st.caption(
+        "Baselines require sufficient same-hour history. Robust scores "
+        "may be unavailable when historical variation is zero. "
+        "A warming-up baseline is not proof that a site is healthy."
+    )
+st.divider()
+st.subheader("Root Cause Analysis")
+
+
+diagnosis = analyze_network_degradation(selected)
+
+st.markdown(f"**Summary:** {diagnosis['summary']}")
+st.markdown(f"**Likely cause:** {diagnosis['likely_cause']}")
+st.markdown(f"**Confidence:** {diagnosis['confidence']}")
+
+st.markdown("**Supporting evidence**")
+for evidence in diagnosis["evidence"]:
+    st.write(f"- {evidence}")
+
+st.markdown("**Recommended checks**")
+for action in diagnosis["recommended_actions"]:
+    st.write(f"- {action}")

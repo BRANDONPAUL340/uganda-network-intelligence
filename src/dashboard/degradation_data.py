@@ -87,3 +87,36 @@ def load_degradation_assessments() -> dict:
                 "Check the database connection, permissions, and schema."
             ),
         }
+
+
+def load_dynamic_degradation_measurements(days: int = 90) -> pd.DataFrame:
+    """Load historical telemetry for dynamic early-warning analysis."""
+    query = text("""
+        SELECT
+            measurement_id,
+            measured_at,
+            site_id,
+            site_name,
+            latency_ms,
+            packet_loss_pct,
+            availability_pct
+        FROM silver_measurements
+        WHERE site_id IS NOT NULL
+          AND measured_at IS NOT NULL
+          AND measured_at >= CURRENT_TIMESTAMP
+              - (:days * INTERVAL '1 day')
+        ORDER BY site_id, measured_at ASC, measurement_id ASC
+    """)
+
+    try:
+        with engine.connect() as connection:
+            return pd.read_sql_query(
+                query,
+                connection,
+                params={"days": max(1, min(int(days), 365))},
+            )
+    except Exception:
+        logger.exception(
+            "Failed to load historical telemetry for dynamic degradation"
+        )
+        raise
