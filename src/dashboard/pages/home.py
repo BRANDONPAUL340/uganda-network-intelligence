@@ -1,209 +1,242 @@
+
 import streamlit as st
+
 from src.dashboard.monitoring import get_pipeline_summary_metrics
 
 
-# ---------------------------------------------------------
-# PAGE STYLING
-# ---------------------------------------------------------
+# ---------------------------------------------------------------------------
+# PAGE CONTENT
+# ---------------------------------------------------------------------------
 
-st.markdown(
+st.html(
     """
     <style>
-    .stApp {
+    .home-hero {
+        position: relative;
+        overflow: hidden;
+        padding: 42px 40px;
+        border: 1px solid rgba(93, 224, 206, 0.25);
+        border-radius: 20px;
         background:
             radial-gradient(
-                circle at 85% 5%,
-                rgba(0, 210, 190, 0.12),
+                circle at 90% 15%,
+                rgba(85, 184, 255, 0.15),
                 transparent 32%
             ),
             linear-gradient(
-                145deg,
-                #07111f 0%,
-                #0b1728 55%,
-                #101d30 100%
+                120deg,
+                rgba(16, 42, 62, 0.98),
+                rgba(8, 26, 43, 0.94)
             );
+        margin-bottom: 26px;
     }
 
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-        max-width: 1500px;
-    }
-
-    .hero {
-        padding: 48px 38px;
-        border: 1px solid rgba(93, 224, 206, 0.25);
-        border-radius: 22px;
-        background: linear-gradient(
-            120deg,
-            rgba(15, 39, 59, 0.97),
-            rgba(8, 26, 43, 0.84)
-        );
-        margin-bottom: 25px;
-    }
-
-    .eyebrow {
+    .home-eyebrow {
         color: #5de0ce;
-        font-size: 12px;
-        font-weight: 700;
+        font-size: 11px;
+        font-weight: 750;
         letter-spacing: 2.5px;
         text-transform: uppercase;
+        margin-bottom: 18px;
     }
 
-    .hero h1 {
+    .home-hero h1 {
         color: #f1f7ff;
-        font-size: clamp(34px, 5vw, 58px);
+        font-size: clamp(34px, 4.5vw, 54px);
         line-height: 1.12;
-        margin: 20px 0;
+        font-weight: 800;
+        letter-spacing: -1.8px;
+        margin: 0 0 18px 0;
     }
 
-    .hero h1 span {
+    .home-hero h1 span {
         color: #5de0ce;
     }
 
-    .hero p {
+    .home-hero p {
         color: #b6c8d9;
-        font-size: 16px;
+        max-width: 760px;
+        font-size: 15px;
         line-height: 1.8;
-        max-width: 780px;
+        margin-bottom: 0;
     }
 
-    .section-heading {
+    .home-section-label {
         color: #f1f7ff;
-        font-size: 23px;
-        font-weight: 700;
-        margin-top: 28px;
+        font-size: 21px;
+        font-weight: 750;
+        letter-spacing: -0.4px;
+        margin-top: 25px;
         margin-bottom: 5px;
     }
 
-    .section-description {
+    .home-section-description {
         color: #9fb2c5;
-        font-size: 14px;
-        margin-bottom: 20px;
+        font-size: 13px;
+        margin-bottom: 18px;
     }
 
-    .feature-card {
-        background: rgba(16, 35, 54, 0.86);
-        border: 1px solid rgba(135, 172, 198, 0.18);
-        border-radius: 15px;
-        padding: 22px;
-        min-height: 175px;
+    .home-feature {
+        min-height: 165px;
+        padding: 21px;
         margin-bottom: 14px;
+        border: 1px solid rgba(120, 163, 190, 0.18);
+        border-radius: 14px;
+        background: rgba(16, 35, 54, 0.82);
+        transition:
+            border-color 160ms ease,
+            transform 160ms ease;
     }
 
-    .feature-card h3 {
+    .home-feature:hover {
+        border-color: rgba(93, 224, 206, 0.42);
+        transform: translateY(-2px);
+    }
+
+    .home-feature .feature-index {
         color: #5de0ce;
-        font-size: 17px;
-        margin-bottom: 10px;
+        font-size: 11px;
+        font-weight: 750;
+        letter-spacing: 1.5px;
+        margin-bottom: 12px;
     }
 
-    .feature-card p {
-        color: #b6c8d9;
-        font-size: 14px;
-        line-height: 1.7;
+    .home-feature h3 {
+        color: #f1f7ff;
+        font-size: 16px;
+        font-weight: 700;
+        margin: 0 0 9px 0;
     }
 
-    .mission {
-        padding: 22px;
-        background: rgba(13, 40, 55, 0.7);
+    .home-feature p {
+        color: #a9bdcf;
+        font-size: 13px;
+        line-height: 1.65;
+        margin: 0;
+    }
+
+    .home-mission {
+        padding: 23px 25px;
+        margin-top: 18px;
+        border: 1px solid rgba(93, 224, 206, 0.2);
         border-left: 4px solid #5de0ce;
-        border-radius: 8px;
-        color: #d7e5f2;
-        line-height: 1.8;
-        margin-top: 15px;
+        border-radius: 12px;
+        background: rgba(13, 40, 55, 0.68);
     }
 
-    .footer-note {
+    .home-mission strong {
+        color: #5de0ce;
+        font-size: 14px;
+    }
+
+    .home-mission p {
+        color: #d1dfeb;
+        font-size: 14px;
+        line-height: 1.75;
+        margin: 8px 0 0 0;
+    }
+
+    .home-footer {
         color: #8196aa;
-        font-size: 12px;
+        font-size: 11px;
         text-align: center;
-        padding: 25px 0 10px 0;
+        line-height: 1.8;
+        padding: 28px 0 8px 0;
+        letter-spacing: 1px;
+    }
+
+    @media (max-width: 768px) {
+        .home-hero {
+            padding: 28px 22px;
+        }
+
+        .home-feature {
+            min-height: auto;
+        }
     }
     </style>
     """,
-    unsafe_allow_html=True,
 )
 
 
-# ---------------------------------------------------------
-# HERO SECTION
-# ---------------------------------------------------------
+# ---------------------------------------------------------------------------
+# EXECUTIVE HERO
+# ---------------------------------------------------------------------------
 
-st.markdown(
+st.html(
     """
-    <div class="hero">
-        <div class="eyebrow">
-            UGANDA | NETWORK INTELLIGENCE | DATA ENGINEERING
+    <section class="home-hero">
+        <div class="home-eyebrow">
+            UGANDA / NETWORK INTELLIGENCE / DATA ENGINEERING
         </div>
+
         <h1>
-            See your network.<br>
-            <span>Understand what is happening.</span>
+            Understand your network.<br>
+            <span>Act with intelligence.</span>
         </h1>
+
         <p>
-            A centralized platform for monitoring data pipelines,
-            evaluating data quality, investigating operational
-            incidents, and understanding how network information
-            moves through your data systems.
+            A centralized network and service intelligence platform
+            bringing together pipeline monitoring, network performance,
+            data quality, incident investigation and data operations.
+            Turn operational data into clearer visibility and better
+            decisions.
         </p>
-    </div>
+    </section>
     """,
-    unsafe_allow_html=True,
 )
 
 
-# ---------------------------------------------------------
-# PRIMARY ACTION
-# ---------------------------------------------------------
+# ---------------------------------------------------------------------------
+# PRIMARY WORKSPACE ACTION
+# ---------------------------------------------------------------------------
 
 st.markdown(
-    '<div class="section-heading">Your operations workspace</div>',
+    '<div class="home-section-label">Operations workspace</div>',
     unsafe_allow_html=True,
 )
 
-st.markdown(
+st.html(
     """
-    <div class="section-description">
-        Move from scattered operational records to a clearer,
-        evidence-based view of system activity and data reliability.
+    <div class="home-section-description">
+        Start with a consolidated view of network and platform operations.
     </div>
     """,
-    unsafe_allow_html=True,
 )
 
 if st.button(
-    "Open Operations Dashboard",
+    "Open Platform Overview",
     type="primary",
+    icon=":material/arrow_forward:",
     width="stretch",
 ):
     st.switch_page("pages/overview.py")
 
 
-# ---------------------------------------------------------
-# LIVE PLATFORM METRICS
-# ---------------------------------------------------------
+# ---------------------------------------------------------------------------
+# LIVE OPERATIONAL METRICS
+# ---------------------------------------------------------------------------
 
 st.markdown("---")
 
 st.markdown(
-    '<div class="section-heading">Platform at a glance</div>',
+    '<div class="home-section-label">Operational snapshot</div>',
     unsafe_allow_html=True,
 )
 
-st.markdown(
+st.html(
     """
-    <div class="section-description">
-        Live operational figures from the existing monitoring layer.
+    <div class="home-section-description">
+        Pipeline and incident figures retrieved from the existing
+        platform monitoring service.
     </div>
     """,
-    unsafe_allow_html=True,
 )
 
 try:
     metrics = get_pipeline_summary_metrics()
 
     if metrics.get("status") == "HEALTHY":
-        metric_columns = st.columns(4)
-
         metric_items = [
             ("Pipeline Runs", "total_runs"),
             ("Successful Runs", "success_runs"),
@@ -211,12 +244,12 @@ try:
             ("Open Incidents", "open_incidents"),
         ]
 
-        for column, (label, key) in zip(
-            metric_columns, metric_items
-        ):
-            with column:
-                value = metrics.get(key)
+        columns = st.columns(4)
 
+        for column, (label, key) in zip(columns, metric_items):
+            value = metrics.get(key)
+
+            with column:
                 if value is not None:
                     st.metric(label, f"{int(value):,}")
                 else:
@@ -225,112 +258,124 @@ try:
     else:
         st.warning(
             "The monitoring service did not report a healthy status. "
-            "Live figures are unavailable."
+            "Live operational figures are currently unavailable."
         )
 
 except Exception as exc:
     st.warning(
-        "Live metrics could not be loaded. "
-        "Other homepage information remains available."
+        "The monitoring service could not provide live figures. "
+        "The remaining homepage information is still available."
     )
-    st.caption(f"Monitoring detail: {type(exc).__name__}")
+    st.caption(f"Technical detail: {type(exc).__name__}")
 
 
-# ---------------------------------------------------------
+# ---------------------------------------------------------------------------
 # PLATFORM CAPABILITIES
-# ---------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 st.markdown("---")
 
 st.markdown(
-    '<div class="section-heading">One platform. Multiple perspectives.</div>',
+    '<div class="home-section-label">Platform capabilities</div>',
     unsafe_allow_html=True,
 )
 
-st.markdown(
+st.html(
     """
-    <div class="section-description">
-        Explore the capabilities already available in the platform.
+    <div class="home-section-description">
+        Explore the operational intelligence functions available
+        across the platform.
     </div>
     """,
-    unsafe_allow_html=True,
 )
 
 features = [
     (
+        "01",
         "Pipeline Intelligence",
-        "Track pipeline executions, review processing history, "
-        "and investigate failed runs.",
+        "Track execution history, review pipeline outcomes "
+        "and investigate failed processing runs.",
     ),
     (
+        "02",
+        "Network Health",
+        "Monitor network availability, latency, packet loss "
+        "and daily performance indicators.",
+    ),
+    (
+        "03",
         "Data Quality",
-        "Review validation outcomes, identify problematic records, "
-        "and examine data-quality trends.",
+        "Review validation results, identify problematic records "
+        "and assess data reliability.",
     ),
     (
+        "04",
         "Incident Management",
-        "Review recorded incidents, understand severity, "
+        "Review recorded incidents, assess severity "
         "and follow issues through resolution.",
     ),
     (
+        "05",
         "Data Lineage",
-        "Understand relationships between data sources, "
-        "processing steps, and downstream records.",
+        "Trace relationships between data sources, processing "
+        "stages and downstream datasets.",
     ),
     (
-        "Event Processing",
-        "Explore available event records and investigate "
-        "processing activity and outcomes.",
-    ),
-    (
+        "06",
         "Data Operations",
-        "Use the existing input interface to submit information "
-        "through the platform's ingestion workflows.",
+        "Access the existing input interface and work "
+        "with the platform's ingestion workflows.",
+    ),
+    (
+        "07",
+        "Degradation Intelligence",
+        "Explore early-warning indicators and identify "
+        "potential network performance deterioration.",
     ),
 ]
 
 feature_columns = st.columns(3)
 
-for index, (title, description) in enumerate(features):
+for index, (number, title, description) in enumerate(features):
     with feature_columns[index % 3]:
-        st.markdown(
+        st.html(
             f"""
-            <div class="feature-card">
+            <div class="home-feature">
+                <div class="feature-index">CAPABILITY {number}</div>
                 <h3>{title}</h3>
                 <p>{description}</p>
             </div>
             """,
-            unsafe_allow_html=True,
         )
 
 
-# ---------------------------------------------------------
-# PROJECT PURPOSE
-# ---------------------------------------------------------
+# ---------------------------------------------------------------------------
+# PLATFORM MISSION
+# ---------------------------------------------------------------------------
 
-st.markdown(
+st.html(
     """
-    <div class="mission">
-        <strong>Our mission</strong><br>
-        Help network operators identify operational problems,
-        monitor data reliability, and make better-informed
-        decisions using centralized network data intelligence.
+    <div class="home-mission">
+        <strong>Platform mission</strong>
+        <p>
+            Empower network operations through reliable data,
+            transparent processing, measurable service performance
+            and actionable operational intelligence.
+        </p>
     </div>
     """,
-    unsafe_allow_html=True,
 )
 
 
-# ---------------------------------------------------------
+# ---------------------------------------------------------------------------
 # FOOTER
-# ---------------------------------------------------------
+# ---------------------------------------------------------------------------
 
-st.markdown(
+st.html(
     """
-    <div class="footer-note">
-        UGANDA NETWORK INTELLIGENCE PLATFORM<br>
-        NETWORK OPERATIONS | DATA QUALITY | PIPELINE MONITORING
+    <div class="home-footer">
+        UGANDA NETWORK & SERVICE INTELLIGENCE PLATFORM<br>
+        NETWORK OPERATIONS / DATA QUALITY / PIPELINE INTELLIGENCE
     </div>
     """,
-    unsafe_allow_html=True,
 )

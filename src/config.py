@@ -1,14 +1,20 @@
 import os
+import re
+from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variable configurations from a local .env file
-load_dotenv()
+# Resolve the project root independently of the current working directory.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Load local configuration before reading required environment variables.
+load_dotenv(PROJECT_ROOT / ".env", override=False)
 
 # ---------------------------------------------------------------------------
 # Core application configuration
 # ---------------------------------------------------------------------------
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_SCHEMA = os.getenv("DATABASE_SCHEMA", "public")
 PIPELINE_NAME = os.getenv(
     "PIPELINE_NAME",
     "uganda_network_intelligence",
@@ -44,6 +50,14 @@ WARNING_LATENCY_MS = float(
     os.getenv("WARNING_LATENCY_MS", "40")
 )
 
+if not re.fullmatch(
+    r"[A-Za-z_][A-Za-z0-9_]{0,62}",
+    DATABASE_SCHEMA,
+):
+    raise ValueError(
+        "CRITICAL CONFIG ERROR: DATABASE_SCHEMA must be "
+        "a valid PostgreSQL identifier of 1–63 characters."
+    )
 
 # ---------------------------------------------------------------------------
 # Pipeline operational thresholds

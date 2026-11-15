@@ -3,15 +3,14 @@ Uganda Network Intelligence Platform - Data Access Layer
 Centralizes connection parameters and dashboard data access.
 """
 
-import os
 import sys
 
 import pandas as pd
 from sqlalchemy import create_engine, text
 
+from src.config import DATABASE_URL, ENVIRONMENT
 
-ENVIRONMENT = os.getenv("ENVIRONMENT", "DEVELOPMENT").upper().strip()
-DATABASE_URL = os.getenv("DATABASE_URL")
+ENVIRONMENT = ENVIRONMENT.upper().strip()
 
 if not DATABASE_URL:
     print("FATAL CONFIGURATION ERROR: DATABASE_URL environment parameter is missing.")

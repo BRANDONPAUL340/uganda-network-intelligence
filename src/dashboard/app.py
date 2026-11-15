@@ -1,4 +1,3 @@
-
 import sys
 from pathlib import Path
 
@@ -14,20 +13,22 @@ import src.config
 
 # Import database-dependent modules only after configuration is ready.
 from src.dashboard.monitoring import get_pipeline_summary_metrics
+
+
 # ---------------------------------------------------------------------------
-# Global Page Configuration
+# GLOBAL PAGE CONFIGURATION
 # ---------------------------------------------------------------------------
 
 st.set_page_config(
     page_title="Uganda Network Intelligence Platform",
-    page_icon="🌐",
+    page_icon=":material/cell_tower:",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 
 # ---------------------------------------------------------------------------
-# Global Enterprise Theme — shared across every dashboard page
+# GLOBAL ENTERPRISE DESIGN SYSTEM
 # ---------------------------------------------------------------------------
 
 st.markdown(
@@ -35,15 +36,18 @@ st.markdown(
     <style>
     :root {
         --uni-bg: #081321;
+        --uni-bg-soft: #0b1929;
         --uni-panel: #102336;
-        --uni-panel-soft: rgba(16, 35, 54, 0.86);
+        --uni-panel-hover: #153047;
         --uni-teal: #5de0ce;
+        --uni-cyan: #55b8ff;
         --uni-text: #f1f7ff;
-        --uni-muted: #b6c8d9;
-        --uni-border: rgba(93, 224, 206, 0.18);
+        --uni-muted: #a9bdcf;
+        --uni-border: rgba(120, 163, 190, 0.18);
+        --uni-border-accent: rgba(93, 224, 206, 0.28);
     }
 
-    /* Application background and typography */
+    /* Application background */
     .stApp {
         background:
             radial-gradient(
@@ -60,10 +64,18 @@ st.markdown(
         color: var(--uni-text);
     }
 
+    /* Main content layout */
+    .block-container {
+        max-width: 1600px;
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+    }
+
     [data-testid="stHeader"] {
         background: rgba(8, 19, 33, 0.88);
     }
 
+    /* Sidebar */
     [data-testid="stSidebar"] {
         background: linear-gradient(
             180deg,
@@ -77,7 +89,25 @@ st.markdown(
         background: transparent;
     }
 
-    /* Consistent page headings */
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
+        color: var(--uni-muted);
+    }
+
+    [data-testid="stSidebar"] a {
+        border-radius: 9px;
+        transition: background 150ms ease;
+    }
+
+    [data-testid="stSidebar"] a:hover {
+        background: rgba(93, 224, 206, 0.08);
+    }
+
+    [data-testid="stSidebar"] a[aria-current="page"] {
+        background: rgba(93, 224, 206, 0.12);
+        border-left: 3px solid var(--uni-teal);
+    }
+
+    /* Typography */
     h1, h2, h3, h4 {
         color: var(--uni-text) !important;
         letter-spacing: -0.025em;
@@ -87,17 +117,22 @@ st.markdown(
         font-weight: 750 !important;
     }
 
-    p, label, .stCaption, [data-testid="stMarkdownContainer"] {
+    p, label, .stCaption {
         color: var(--uni-muted);
     }
 
-    /* Enterprise panels and metric cards */
+    /* Metric cards */
     [data-testid="stMetric"] {
-        background: var(--uni-panel-soft);
+        background: rgba(16, 35, 54, 0.88);
         border: 1px solid var(--uni-border);
         border-radius: 14px;
         padding: 18px 20px;
         min-height: 112px;
+        transition: border-color 160ms ease;
+    }
+
+    [data-testid="stMetric"]:hover {
+        border-color: var(--uni-border-accent);
     }
 
     [data-testid="stMetricLabel"] {
@@ -126,7 +161,9 @@ st.markdown(
         );
         color: #f1f7ff;
         font-weight: 650;
-        transition: border-color 160ms ease, transform 160ms ease;
+        transition:
+            border-color 160ms ease,
+            transform 160ms ease;
     }
 
     .stButton > button:hover,
@@ -138,7 +175,8 @@ st.markdown(
     }
 
     /* Inputs and selectors */
-    input, textarea,
+    input,
+    textarea,
     [data-baseweb="select"] > div,
     [data-baseweb="input"] > div {
         border-radius: 8px !important;
@@ -150,6 +188,14 @@ st.markdown(
         border: 1px solid var(--uni-border);
         border-radius: 12px;
         overflow: hidden;
+    }
+
+    /* Charts */
+    [data-testid="stVegaLiteChart"],
+    [data-testid="stArrowVegaLiteChart"],
+    [data-testid="stLineChart"],
+    [data-testid="stBarChart"] {
+        border-radius: 12px;
     }
 
     /* Tabs */
@@ -184,8 +230,13 @@ st.markdown(
         color: var(--uni-teal) !important;
     }
 
-    /* Keep the design usable on smaller screens */
+    /* Responsive layout */
     @media (max-width: 768px) {
+        .block-container {
+            padding-top: 1rem;
+            padding-bottom: 2rem;
+        }
+
         [data-testid="stMetric"] {
             padding: 12px;
             min-height: 95px;
@@ -197,18 +248,18 @@ st.markdown(
 )
 
 
-
 # ---------------------------------------------------------------------------
-# Sidebar Branding
+# SIDEBAR BRANDING
 # ---------------------------------------------------------------------------
 
-st.sidebar.title("🌍 UGANDA NETWORK")
+st.sidebar.title("UGANDA NETWORK")
 st.sidebar.subheader("INTELLIGENCE")
+st.sidebar.caption("NETWORK & SERVICE INTELLIGENCE")
 st.sidebar.markdown("---")
 
 
 # ---------------------------------------------------------------------------
-# Database Health Check
+# DATABASE HEALTH CHECK
 # ---------------------------------------------------------------------------
 
 try:
@@ -220,10 +271,8 @@ except Exception:
 
 
 # ---------------------------------------------------------------------------
-# Multi-Page Navigation
+# MULTI-PAGE NAVIGATION
 # ---------------------------------------------------------------------------
-#
-# The Input Data page is the final operational ingestion interface.
 #
 # Event Store Worker Monitoring remains intentionally excluded because its
 # underlying persistence model is not part of the authoritative schema.
@@ -233,93 +282,89 @@ except Exception:
 
 pages = {
     "Dashboard & Home": [
-    st.Page(
-        "pages/home.py",
-        title="Home",
-        icon=":material/home:",
-        default=True,
-    ),
-    st.Page(
-        "pages/overview.py",
-        title="Platform Overview",
-        icon=":material/dashboard:",
-    ),
+        st.Page(
+            "pages/home.py",
+            title="Home",
+            icon=":material/home:",
+            default=True,
+        ),
+        st.Page(
+            "pages/overview.py",
+            title="Platform Overview",
+            icon=":material/dashboard:",
+        ),
         st.Page(
             "pages/pipeline_runs.py",
             title="Pipeline Execution Logs",
-            icon="🔄",
+            icon=":material/sync_alt:",
         ),
     ],
 
-    "📡 Telemetry & Metrics": [
+    "Telemetry & Metrics": [
         st.Page(
             "pages/data_quality.py",
             title="Data Quality Engine",
-            icon="✅",
+            icon=":material/verified:",
         ),
         st.Page(
             "pages/incidents.py",
             title="Incident Management Panel",
-            icon="🚨",
+            icon=":material/warning:",
         ),
-
         st.Page(
             "pages/network_health.py",
             title="Network Health Intelligence",
             icon=":material/monitor_heart:",
         ),
-
         st.Page(
-             "pages/degradation_early_warning.py",
-              title="Degradation Early Warning",
-              icon=":material/trending_up:",
-      ),
+            "pages/degradation_early_warning.py",
+            title="Degradation Early Warning",
+            icon=":material/trending_up:",
+        ),
     ],
 
-    "🧭 Data Lineage": [
+    "Data Lineage": [
         st.Page(
             "pages/lineage.py",
             title="Data Lineage Map",
-            icon="🧭",
+            icon=":material/account_tree:",
         ),
-
-        
     ],
 
-    "📝 Data Operations": [
+    "Data Operations": [
         st.Page(
             "pages/input_data.py",
             title="Input Data",
-            icon="📝",
+            icon=":material/database:",
         ),
     ],
 }
 
 
 # ---------------------------------------------------------------------------
-# Navigation Router
+# NAVIGATION ROUTER
 # ---------------------------------------------------------------------------
 
 navigation_router = st.navigation(pages)
 
 
 # ---------------------------------------------------------------------------
-# Sidebar Infrastructure Status
+# SIDEBAR INFRASTRUCTURE STATUS
 # ---------------------------------------------------------------------------
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🖥️ System Infrastructure")
+st.sidebar.markdown("### System Infrastructure")
 
 if db_connected:
-    st.sidebar.success("🟢 PostgreSQL 18: Connected")
+    st.sidebar.success("PostgreSQL 18: Connected")
 else:
-    st.sidebar.error("🔴 PostgreSQL 18: Disconnected")
+    st.sidebar.error("PostgreSQL 18: Disconnected")
 
-st.sidebar.caption("Workstation Node Location: Kampala, Uganda")
+st.sidebar.caption("Workstation Node: Kampala, Uganda")
 
 
 # ---------------------------------------------------------------------------
-# Execute Selected Page
+# EXECUTE SELECTED PAGE
 # ---------------------------------------------------------------------------
 
 navigation_router.run()
